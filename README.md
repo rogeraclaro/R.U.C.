@@ -33,12 +33,11 @@ desenvolupament no comencen fins que s'acaba.
 El colon apareix al poble (casella central del mapa). Amb les fletxes (o el control tàctil de la dreta del panell) camina en temps real;
 el rellotge corre sempre, també mentre camines o estàs parat.
 
-- **Corral** i **tallers** de menjar, energia i smithore: cal caminar fins al **taulell** interior de cada edifici (un anell blanc en
-  marca el punt exacte) perquè hi passi res; entrar i sortir són passos reals i graduals, no un teletransport. Fregar la porta de
-  passada mentre camines pel carrer no compra ni reequipa res per error.
+- **Corral** i **tallers** de menjar, energia i smithore: el teu colon **es queda a la porta**; camina fins allà i empeny-hi uns
+  instants (fregar-la de passada no compta) perquè el RUC entri sol fins al taulell interior (un anell el marca) i torni, una mica
+  lent. Un cop compromesa, la visita es fa sencera; seguir empenyent després no torna a cobrar.
 - **Corral**: al taulell compres un RUC. Si hi entres portant-ne un, el retornes: recuperes el **preu sencer del robot**, mai l'equip.
-- **Tallers**: al taulell pagues l'equip (25 / 50 / 75 cr) per al RUC que portes. Arribar-hi i tornar a sortir és una sola visita;
-  seguir caminant cap endins un cop fet no torna a cobrar.
+- **Tallers**: al taulell pagues l'equip (25 / 50 / 75 cr) per al RUC que portes.
 - **Instal·lar**: surt del poble per una vora oberta, camina fins a la **casa** —ara tota la parcel·la teva, no només el centre— i
   prem **Acció**. No és instantani: el RUC puja, se li afegeix l'especialització i torna a baixar (uns 2 s) abans de quedar instal·lat;
   mentrestant no es pot caminar ni tornar a prémer Acció. Si a la parcel·la ja hi havia un RUC, ara et segueix aquell.
@@ -224,7 +223,8 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | Magnituds dels planetaris | manual: només el sentit (pluja àcida: menjar ↑ energia ↓; terratrèmol: mines ↓) | pluja +35 % / −30 %, activitat solar +30 %, terratrèmol −25 % smithore (xifres heretades dels antics esdeveniments; la targeta ho indica) | baixa | Comparar collites abans/després de cada esdeveniment |
 | Plaga, radiació, incendi | secundària | plaga: una parcel·la de menjar no produeix; radiació: fuig un RUC instal·lat; incendi: la botiga perd tot l'estoc | mitjana | Confirmar-ne l'efecte exacte en emulador |
 | Velocitats de caminar, alentiment de riu/muntanya, geometria del poble | manual: riu i muntanya alenteixen, la diagonal és més ràpida | 0,12 px/ms al mapa (50 % a riu/muntanya), 0,2 px/ms al poble (retocat a 2/3 de l'anterior després de jugar-hi); poble amb carrer i passatge | baixa | Cronometrar recorreguts en emulador |
-| Instal·lació i fugida animades (pujada/afegit/baixada del RUC; espurneig i sortida corrents); casa = tota la parcel·la; entrada/sortida de botiga graduals amb taulell interior; avís de 3 s abans del torn humà | no són regles del C64, són decisions de disseny pròpies | 1800 ms d'instal·lació, 400+900 ms de fugida, radi de taulell 28 px, avís 3000 ms (`CONFIG.WALK.installMs/fleeShuffleMs/fleeRunMs/shopRadius`, `CONFIG.DEV.countdownMs`) | — (no aplica: no és una afirmació de fidelitat) | — |
+| Instal·lació i fugida animades (pujada/afegit/baixada del RUC; espurneig i sortida corrents); casa = tota la parcel·la; avís de 3 s abans del torn humà | no són regles del C64, són decisions de disseny pròpies | 1800 ms d'instal·lació, 400+900 ms de fugida, avís 3000 ms (`CONFIG.WALK.installMs/fleeShuffleMs/fleeRunMs`, `CONFIG.DEV.countdownMs`) | — (no aplica: no és una afirmació de fidelitat) | — |
+| Botiga/corral: el colon es queda a la porta i només el RUC camina fins al taulell i torna | no és una regla del C64, és una decisió de disseny pròpia | cal empènyer 350 ms a la porta perquè comprometi la visita; 2200 ms de viatge del RUC (`CONFIG.WALK.doorHoldMs/visitMs`) | — (no aplica) | — |
 | Separació de marcadors després de cada unitat | l'original manté la unitat a unitat mentre les línies es toquen | R.U.C. separa 2 passos després de cada unitat i cal tornar a creuar 0,5 s | — | Decidir si es canvia (ajornat, vegeu sota) |
 | Preu mínim del smithore | manual contradictori: 14 $ (text) i 25–250 $ (contraportada) | 14 (com demana l'encàrrec) | mitjana | Veure el preu mínim real de la botiga en emulador |
 
