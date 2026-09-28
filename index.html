@@ -85,7 +85,10 @@ const CONFIG = deepFreeze({
   DEV: { lowCorral: 7 },
   // Walking during development. All [PROVISIONAL] (speeds, slow terrain, house radius): not measured on the C64 yet.
   // [manual] river and mountains slow you down; diagonal is the fastest way to move (so the two axes are not normalised).
-  WALK: { stepMs: 10, mapSpeed: 0.18, townSpeed: 0.3, slowPct: 50, houseRadius: 16 },
+  // mapSpeed/townSpeed: 2/3 of the original PROVISIONAL values (0.18/0.3), per playtesting feedback, still PROVISIONAL.
+  // installMs: not C64-sourced — our own pacing so the RUC visibly rises, gets its module and comes back down instead of installing at once.
+  // fleeShuffleMs/fleeRunMs: not C64-sourced — our own flee choreography (a quick side-to-side jitter, then a dash off in a random direction).
+  WALK: { stepMs: 10, mapSpeed: 0.12, townSpeed: 0.2, slowPct: 50, houseRadius: 16, installMs: 1800, fleeShuffleMs: 400, fleeRunMs: 900 },
   DIFFICULTY: {
     relaxed: { label: 'Relaxada', reactMin: 700, reactMax: 1300, valuationErr: 15, minReserve: 2, humanTimeMs: 90000, landMsPerPlot: 500 },
     colony: { label: 'Colònia', reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3, humanTimeMs: 60000, landMsPerPlot: 400 },
@@ -1389,7 +1392,8 @@ const DevWalk = {
   create(state, pid, timeMs) {
     return {
       pid, area: 'town', x: (TOWN.passX0 + TOWN.passX1) / 2, y: (TOWN.streetTop + TOWN.streetBottom) / 2,
-      carrying: null, latch: null, timeLeft: timeMs, timeTotal: timeMs, acc: 0, ended: null, msg: '', bad: false, log: [], seq: 0
+      carrying: null, latch: null, installing: null, fleeing: null, endWhy: null,
+      timeLeft: timeMs, timeTotal: timeMs, acc: 0, ended: null, msg: '', bad: false, log: [], seq: 0
     };
   },
   plotAt(state, x, y) {
@@ -1406,14 +1410,19 @@ const DevWalk = {
     const slow = p.terrain === TERRAIN.RIVER || p.terrain === TERRAIN.MOUNTAIN;
     return CONFIG.WALK.mapSpeed * (slow ? CONFIG.WALK.slowPct : 100) / 100;
   },
-  /** dir: { x, y } with each axis in {-1, 0, 1}. */
+  /**
+   * dir: { x, y } with each axis in {-1, 0, 1}. Movement and actions are suspended while `installing` or `fleeing` play out
+   * (busy states); the development clock keeps running regardless, same as walking or standing still.
+   */
   update(state, w, dir, dtMs) {
     if (w.ended) return;
     w.acc += dtMs;
     while (w.acc >= CONFIG.WALK.stepMs && !w.ended) {
       w.acc -= CONFIG.WALK.stepMs;
       w.timeLeft -= CONFIG.WALK.stepMs;
-      if (dir.x || dir.y) this.move(state, w, dir);
+      if (w.installing) { w.installing.t += CONFIG.WALK.stepMs; if (w.installing.t >= CONFIG.WALK.installMs) this.finishInstall(state, w); }
+      else if (w.fleeing) { w.fleeing.t += CONFIG.WALK.stepMs; if (w.fleeing.t >= CONFIG.WALK.fleeShuffleMs + CONFIG.WALK.fleeRunMs) this.finishFlee(w); }
+      else if (dir.x || dir.y) this.move(state, w, dir);
       if (w.timeLeft <= 0) this.end(state, w, 'timeout');
     }
   },
@@ -1489,7 +1498,7 @@ const DevWalk = {
   },
   /** The "joystick button" (Enter / Space / Acció). It only does something on the map; clicks on the map never call it. */
   act(state, w) {
-    if (w.ended) return null;
+    if (w.ended || w.installing || w.fleeing) return null; // busy: already installing or fleeing
     if (w.area !== 'map') return this.say(w, 'Al poble, entra als edificis caminant-hi.', true);
     const plot = this.plotAt(state, w.x, w.y); const own = plot.ownerId === w.pid; const house = this.atHouse(w, plot);
     if (!w.carrying) {
@@ -1501,18 +1510,52 @@ const DevWalk = {
     }
     if (house && own) {
       if (!w.carrying.module) return this.say(w, 'Aquest RUC no està equipat: porta\'l abans a un taller.', true);
-      const r = StoreSystem.install(state, w.pid, plot.id, w.carrying);
-      w.carrying = r.previous ? { module: r.previous.module, paid: r.previous.paid } : null;
-      return this.say(w, r.previous ? `RUC instal·lat a la parcel·la #${plot.id + 1}; l'anterior ara et segueix.` : `RUC instal·lat a la parcel·la #${plot.id + 1}.`, false, 'install');
+      // Not instant: the RUC rises to the house, the module is added, then it comes back down (finishInstall applies the change).
+      w.installing = { plotId: plot.id, ruc: w.carrying, t: 0 };
+      w.carrying = null;
+      return this.say(w, `Instal·lant el RUC a la parcel·la #${plot.id + 1}...`, false, 'installing');
     }
     // [manual] Standard: pressing the button anywhere but over the house of your own plot makes the M.U.L.E. run away.
     return this.flee(state, w, 'Has premut fora de la casa d\'una parcel·la teva: el RUC ha fugit!');
   },
-  flee(state, w, msg) { w.carrying = null; StoreSystem.loseRuc(state); return this.say(w, msg, true, 'flee'); },
-  /** End of the colonist's development (time out or voluntary): a RUC still being led runs away ([manual]); nothing is refunded. */
+  /** Applies the deferred install once the rise/add/descend animation has played (see `act`). */
+  finishInstall(state, w) {
+    const { plotId, ruc } = w.installing;
+    const r = StoreSystem.install(state, w.pid, plotId, ruc);
+    w.carrying = r.previous ? { module: r.previous.module, paid: r.previous.paid } : null;
+    w.installing = null;
+    this.say(w, r.previous ? `RUC instal·lat a la parcel·la #${plotId + 1}; l'anterior ara et segueix.` : `RUC instal·lat a la parcel·la #${plotId + 1}.`, false, 'install');
+  },
+  /**
+   * The RUC's own effect (lost for good, nothing refunded) applies at once; only the visual choreography — a quick jitter, then a
+   * dash off in a random direction — is deferred (`w.fleeing`, resolved by `finishFlee`). The direction is derived from the current
+   * state rather than drawn from the seeded PRNG, so it stays deterministic without disturbing that stream.
+   */
+  flee(state, w, msg) {
+    const angle = (SeededRNG.hash(`flee|${state.turn}|${w.pid}|${Math.round(w.x)}|${Math.round(w.y)}|${w.timeLeft}`) % 360) * Math.PI / 180;
+    w.fleeing = { t: 0, angle };
+    w.carrying = null;
+    StoreSystem.loseRuc(state);
+    return this.say(w, msg, true, 'flee');
+  },
+  /** Resolves a deferred `end()` (see below) once the flee animation is done. */
+  finishFlee(w) {
+    w.fleeing = null;
+    if (w.endWhy) { const why = w.endWhy; w.endWhy = null; w.ended = why; w.timeLeft = Math.max(0, w.timeLeft); }
+  },
+  /**
+   * End of the colonist's development (time out or voluntary): a RUC still being led runs away ([manual]); nothing is refunded.
+   * If it was mid-install, that install is completed first (a leftover previous module, if any, flees instead). `w.ended` itself
+   * is only set once any flee animation this triggers has played, so the turn queue does not move on before it is shown.
+   */
   end(state, w, why) {
-    if (w.ended) return;
-    if (w.carrying) this.flee(state, w, why === 'timeout' ? 'S\'ha acabat el temps amb el RUC a la mà: ha fugit.' : 'Has acabat el torn amb el RUC a la mà: ha fugit.');
+    if (w.ended || w.fleeing) return;
+    if (w.installing) this.finishInstall(state, w);
+    if (w.carrying) {
+      this.flee(state, w, why === 'timeout' ? 'S\'ha acabat el temps amb el RUC a la mà: ha fugit.' : 'Has acabat el torn amb el RUC a la mà: ha fugit.');
+      w.endWhy = why;
+      return;
+    }
     w.ended = why; w.timeLeft = Math.max(0, w.timeLeft);
   }
 };
@@ -1556,7 +1599,11 @@ const Hud = {
       r.text(String(human.inventory[d.id]), x + 38, 16, { size: 20 });
     });
     const tl = game.hudTimer();
-    if (tl !== null) { r.text(`Temps ${fmtTime(tl)}`, 770, 16, { size: 20, color: tl < 10000 ? COL.bad : COL.text }); }
+    if (tl) {
+      const urgent = tl.left < 10000;
+      r.bar(766, 18, 164, 20, tl.left / tl.total, urgent ? COL.bad : COL.cyan);
+      r.text('temps', 766, 40, { size: 14, color: COL.dim });
+    }
     r.button('hud-pause', game.paused ? 'Reprèn' : 'Pausa', 940, 8, 100, 40, { onClick: () => game.togglePause() });
     r.button('hud-sound', game.settings.sound ? 'So: sí' : 'So: no', 1048, 8, 100, 40, { onClick: () => game.toggleSound() });
     r.button('hud-help', 'Ajuda', 1156, 8, 108, 40, { onClick: () => game.toggleHelp() });
@@ -1795,9 +1842,18 @@ class MapScreen {
       }
     });
   }
+  /** Colonist portrait + identity dot, drawn in place at (X, Y): shared by the normal, installing and fleeing renders. */
+  drawColonist(r, p, X, Y) {
+    const c = r.ctx;
+    r.assetFrame('colonists_strip', X - 16, Y - 40, 32, 32, Math.max(0, portraitFrame(p)));
+    c.strokeStyle = '#000'; c.lineWidth = 5; c.beginPath(); c.arc(X, Y, 7, 0, Math.PI * 2); c.stroke();
+    r.glyph(p.shape, X, Y, 6, p.color, '#fff');
+  }
   drawWalker(game, r, w) {
-    const c = r.ctx; const p = playerById(game.state, w.pid);
+    const p = playerById(game.state, w.pid);
     const X = CONFIG.MAP_X + w.x; const Y = CONFIG.MAP_Y + w.y;
+    if (w.installing) { this.drawInstalling(game, r, w, p, X, Y); return; }
+    if (w.fleeing) { this.drawFleeing(game, r, w, p, X, Y); return; }
     const moving = game.devDirs().x !== 0 || game.devDirs().y !== 0;
     if (w.carrying) {
       const frame = moving && !game.settings.reduceMotion ? Math.floor(game.now / 90) % 8 : 0;
@@ -1805,10 +1861,32 @@ class MapScreen {
       if (w.carrying.module) r.asset(RESOURCE_DEFS[w.carrying.module].module, X - 34, Y + 6, 20, 20);
       else r.text('?', X - 30, Y + 4, { size: 16, color: COL.bad });
     }
-    r.assetFrame('colonists_strip', X - 16, Y - 40, 32, 32, Math.max(0, portraitFrame(p)));
-    // The exact point that counts for doors and houses.
-    c.strokeStyle = '#000'; c.lineWidth = 5; c.beginPath(); c.arc(X, Y, 7, 0, Math.PI * 2); c.stroke();
-    r.glyph(p.shape, X, Y, 6, p.color, '#fff');
+    this.drawColonist(r, p, X, Y);
+  }
+  /** The RUC rises to the house, its new module appears at the top, then it comes back down (see CONFIG.WALK.installMs). */
+  drawInstalling(game, r, w, p, X, Y) {
+    this.drawColonist(r, p, X, Y);
+    const k = clamp(w.installing.t / CONFIG.WALK.installMs, 0, 1);
+    const rise = k < 0.5 ? k / 0.5 : 1 - (k - 0.5) / 0.5; // 0 -> 1 -> 0
+    const dy = game.settings.reduceMotion ? -20 : -Math.round(rise * 34);
+    const frame = game.settings.reduceMotion ? 0 : Math.floor(game.now / 90) % 8;
+    r.asset('ruc_walk_strip', X - 20, Y - 34 + dy, 40, 40, frame);
+    if (k > 0.45) r.asset(RESOURCE_DEFS[w.installing.ruc.module].module, X - 4, Y - 6 + dy, 22, 22);
+    // Clamped so the label never climbs into the instruction line above the map, even for a plot on the top row.
+    r.text('Instal·lant…', X, Math.max(CONFIG.MAP_Y + 4, Y - 68 + dy), { size: 16, color: COL.amber, align: 'center' });
+  }
+  /** A quick side-to-side jitter, then a dash off in a random direction (see CONFIG.WALK.fleeShuffleMs/fleeRunMs). Not C64-sourced. */
+  drawFleeing(game, r, w, p, X, Y) {
+    this.drawColonist(r, p, X, Y);
+    const t = w.fleeing.t; const shuffleMs = CONFIG.WALK.fleeShuffleMs;
+    let fx = X; let fy = Y;
+    if (t < shuffleMs) fx = X + Math.sin(t / 35) * 8;
+    else {
+      const dist = ((t - shuffleMs) / CONFIG.WALK.fleeRunMs) * 260;
+      fx = X + Math.cos(w.fleeing.angle) * dist; fy = Y + Math.sin(w.fleeing.angle) * dist;
+    }
+    const frame = game.settings.reduceMotion ? 0 : Math.floor(game.now / 60) % 8;
+    r.asset('ruc_walk_strip', fx - 20, fy - 20, 40, 40, frame);
   }
   drawTooltip(game, r, p, px, py) {
     let lines;
@@ -1954,11 +2032,12 @@ class MapScreen {
     const who = playerById(s, slot.pid);
     const walk = game.humanWalk();
     if (walk) {
-      const cr = walk.carrying;
-      const carry = cr ? `Portes un RUC ${cr.module ? `equipat per a ${resLabel(cr.module).toLowerCase()}` : 'sense equipar'} (robot: ${cr.paid} cr)` : 'No portes cap RUC';
-      r.text(carry, X + 12, Y + 8, { size: 18, color: cr ? COL.amber : COL.text, maxW: 660 });
+      const cr = walk.carrying; const busy = !!(walk.installing || walk.fleeing);
+      const carry = walk.installing ? 'Instal·lant el RUC…' : walk.fleeing ? 'El RUC fuig!'
+        : cr ? `Portes un RUC ${cr.module ? `equipat per a ${resLabel(cr.module).toLowerCase()}` : 'sense equipar'} (robot: ${cr.paid} cr)` : 'No portes cap RUC';
+      r.text(carry, X + 12, Y + 8, { size: 18, color: busy ? COL.amber : cr ? COL.amber : COL.text, maxW: 660 });
       r.text(walk.msg || (walk.area === 'town' ? 'Camina dins dels edificis per usar-los. Surt per les vores obertes.' : 'Acció sobre la casa d\'una parcel·la teva: instal·la o retira un RUC.'), X + 12, Y + 36, { size: 16, color: walk.bad ? COL.bad : COL.dim, maxW: 660 });
-      r.button('d-act', 'Acció (Enter)', X + 12, Y + 72, 200, 40, { primary: true, onClick: () => game.devAction() });
+      r.button('d-act', 'Acció (Enter)', X + 12, Y + 72, 200, 40, { primary: true, disabled: busy, onClick: () => game.devAction() });
       r.button('d-end', cr ? 'Acabar (el RUC fugirà)' : 'Acabar el torn', X + 222, Y + 72, 250, 40, { onClick: () => game.devFinish() });
       r.text('Fletxes: caminar', X + 484, Y + 84, { size: 16, color: COL.dim });
       this.drawPad(game, r, X + 790, Y + 61);
@@ -2712,10 +2791,14 @@ class Game {
   }
 
   /* ---- what the HUD/instruction line shows ---- */
+  /** { left, total } for the HUD's shrinking time bar, or null when nothing is timed right now. */
   hudTimer() {
     const ph = this.turns.phase;
-    if (ph === 'DEVELOPMENT') { const w = this.humanWalk(); return w ? w.timeLeft : null; }
-    if (ph && ph.startsWith('AUCTION_') && this.rt.auction) { const e = this.rt.auction.engine; return e.canDeclare() ? e.declareLeft : Math.max(0, CONFIG.AUCTION.maxMs - e.t); }
+    if (ph === 'DEVELOPMENT') { const w = this.humanWalk(); return w ? { left: w.timeLeft, total: w.timeTotal } : null; }
+    if (ph && ph.startsWith('AUCTION_') && this.rt.auction) {
+      const e = this.rt.auction.engine;
+      return e.canDeclare() ? { left: e.declareLeft, total: CONFIG.AUCTION.declareMs } : { left: Math.max(0, CONFIG.AUCTION.maxMs - e.t), total: CONFIG.AUCTION.maxMs };
+    }
     return null;
   }
   /** The live land-race object while the LAND_GRANT phase runs (null otherwise). */
@@ -3053,6 +3136,8 @@ function runSelfTests() {
     return goUntil(state, w, { x: 0, y: 1 }, () => w.area === 'map');
   };
   const toHouse = (state, w, plotId) => goUntil(state, w, { x: 0, y: 1 }, () => DevWalk.atHouse(w, state.plots[plotId]));
+  /** Presses Acció (starting a deferred install) and runs the game clock past CONFIG.WALK.installMs so it actually applies. */
+  const install = (state, w) => { const k = DevWalk.act(state, w); if (k !== 'installing') return k; go(state, w, { x: 0, y: 0 }, CONFIG.WALK.installMs + 50); return 'install'; };
   const mkGame = () => { const g = new Game(document.createElement('canvas'), new AssetLoader([])); g.persist = false; return g; };
   const noSavedAt = (k, v) => (k === 'savedAt' ? undefined : v);
 
@@ -3297,13 +3382,45 @@ function runSelfTests() {
       const bad = audited(state, 1); if (bad !== true) return bad;
     }
   });
-  t('Walk: leading an outfitted RUC to the house of your own plot and pressing the button installs it (no refund)', () => {
+  t('Walk: leading an outfitted RUC to the house of your own plot and pressing the button installs it, not instantly (no refund)', () => {
     const { state, w } = walkState(); const p = state.players[0]; LandGrantSystem.assign(state, 'p0', 31);
     visit(state, w, 'corral'); visit(state, w, 'shop_food'); const cash = p.cash;
     if (!leaveSouth(state, w) || !toHouse(state, w, 31)) return 'could not reach the house';
-    const k = DevWalk.act(state, w);
-    if (k !== 'install' || !state.plots[31].ruc || state.plots[31].ruc.module !== 'food' || w.carrying) return `act ${k}: ${w.msg}`;
+    const started = DevWalk.act(state, w);
+    if (started !== 'installing' || state.plots[31].ruc || !w.installing || w.carrying) return `act ${started}: must not install at once`;
+    if (DevWalk.act(state, w) !== null) return 'the button must be busy while installing';
+    go(state, w, { x: 0, y: 0 }, CONFIG.WALK.installMs - 200);
+    if (state.plots[31].ruc) return 'installed before CONFIG.WALK.installMs';
+    go(state, w, { x: 0, y: 0 }, 250);
+    if (!state.plots[31].ruc || state.plots[31].ruc.module !== 'food' || w.carrying || w.installing) return `not installed after installMs: ${w.msg}`;
     return p.cash === cash ? audited(state) : 'installing changed the cash';
+  });
+  t('Walk speed: 2/3 of the previous PROVISIONAL values (per playtesting feedback)', () => eq(`${CONFIG.WALK.mapSpeed}/${CONFIG.WALK.townSpeed}`, '0.12/0.2', 'WALK speeds'));
+  t('Install animation: blocks movement and Acció while it plays, resolves after exactly CONFIG.WALK.installMs', () => {
+    const { state, w } = walkState(); LandGrantSystem.assign(state, 'p0', 31);
+    visit(state, w, 'corral'); visit(state, w, 'shop_food'); leaveSouth(state, w); toHouse(state, w, 31);
+    if (DevWalk.act(state, w) !== 'installing') return 'act did not start installing';
+    const x0 = w.x; const y0 = w.y;
+    go(state, w, { x: 1, y: 1 }, 300); // also advances the install clock by 300 ms; the check below reads it back rather than assuming 0
+    if (w.x !== x0 || w.y !== y0 || DevWalk.act(state, w) !== null) return 'movement or Acció not blocked while installing';
+    go(state, w, { x: 0, y: 0 }, CONFIG.WALK.installMs - w.installing.t - 200);
+    if (state.plots[31].ruc) return 'installed too early';
+    go(state, w, { x: 0, y: 0 }, 250);
+    return state.plots[31].ruc && state.plots[31].ruc.module === 'food' && !w.installing ? true : 'not installed on time';
+  });
+  t('Flee animation (not C64-sourced): the RUC is lost at once, but the dash off blocks movement until CONFIG.WALK.fleeShuffleMs + fleeRunMs', () => {
+    const { state, w } = walkState(); LandGrantSystem.assign(state, 'p1', 40);
+    visit(state, w, 'corral'); visit(state, w, 'shop_food'); leaveSouth(state, w);
+    goUntil(state, w, { x: 0, y: 1 }, () => DevWalk.atHouse(w, state.plots[40]));
+    const lostBefore = state.rucs.lost;
+    if (DevWalk.act(state, w) !== 'flee' || w.carrying || state.rucs.lost !== lostBefore + 1 || !w.fleeing) return 'the RUC must be lost at once, animation deferred';
+    const x0 = w.x; const y0 = w.y;
+    go(state, w, { x: 1, y: 0 }, 300); // also advances the flee clock by 300 ms; the check below reads it back rather than assuming 0
+    if (w.x !== x0 || w.y !== y0) return 'movement not blocked while fleeing';
+    go(state, w, { x: 0, y: 0 }, CONFIG.WALK.fleeShuffleMs + CONFIG.WALK.fleeRunMs - w.fleeing.t - 100);
+    if (!w.fleeing) return 'resolved too early';
+    go(state, w, { x: 0, y: 0 }, 150);
+    return !w.fleeing ? audited(state) : 'flee animation never resolved';
   });
   t('Walk: no remote development (no panel API, the button does nothing in town); unoutfitted, foreign plot or away from the house never installs', () => {
     if (['humanPickPlot', 'confirmInstall', 'chooseModule', 'buyRuc', 'returnRuc', 'canInstall'].some((m) => typeof Game.prototype[m] === 'function')) return 'a remote development API still exists';
@@ -3322,14 +3439,14 @@ function runSelfTests() {
   });
   t('Walk: changing an installed RUC = pick it up at the plot, re-outfit it in a shop (paid) and walk back to install it', () => {
     const { state, w } = walkState(); const p = state.players[0]; LandGrantSystem.assign(state, 'p0', 31);
-    visit(state, w, 'corral'); visit(state, w, 'shop_food'); leaveSouth(state, w); toHouse(state, w, 31); DevWalk.act(state, w);
+    visit(state, w, 'corral'); visit(state, w, 'shop_food'); leaveSouth(state, w); toHouse(state, w, 31); install(state, w);
     const cash = p.cash; const t0 = w.timeLeft;
     if (DevWalk.act(state, w) !== 'pickup' || state.plots[31].ruc || w.carrying.module !== 'food') return 'pick up';
     if (!goUntil(state, w, { x: 0, y: -1 }, () => w.area === 'town')) return 'could not go back to town';
     if (visit(state, w, 'shop_energy').join() !== 'outfit') return 're-outfit';
     if (p.cash !== cash - CONFIG.MODULE_COST.energy) return `re-outfit charged ${cash - p.cash}`;
     leaveSouth(state, w); toHouse(state, w, 31);
-    if (DevWalk.act(state, w) !== 'install' || state.plots[31].ruc.module !== 'energy') return 'reinstall';
+    if (install(state, w) !== 'install' || state.plots[31].ruc.module !== 'energy') return 'reinstall';
     if (!(w.timeLeft < t0 - 2000)) return 'the round trip must cost development time';
     return audited(state);
   });
@@ -3345,8 +3462,9 @@ function runSelfTests() {
     for (const how of ['timeout', 'done']) {
       const { state, w } = walkState(`flee-${how}`); const p = state.players[0];
       visit(state, w, 'corral'); visit(state, w, 'shop_food'); const cash = p.cash;
-      if (how === 'timeout') go(state, w, { x: 0, y: 0 }, 70000); else DevWalk.end(state, w, 'done');
-      if (w.ended !== how || w.carrying) return `${how}: still carrying`;
+      if (how === 'timeout') go(state, w, { x: 0, y: 0 }, 70000);
+      else { DevWalk.end(state, w, 'done'); go(state, w, { x: 0, y: 0 }, CONFIG.WALK.fleeShuffleMs + CONFIG.WALK.fleeRunMs + 50); }
+      if (w.ended !== how || w.carrying || w.fleeing) return `${how}: still carrying or fleeing (ended ${w.ended})`;
       if (p.cash !== cash || state.store.ruc !== 15 || state.rucs.lost !== 1) return `${how}: cash ${p.cash} corral ${state.store.ruc} lost ${state.rucs.lost}`;
       const bad = audited(state); if (bad !== true) return bad;
     }
