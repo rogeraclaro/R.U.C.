@@ -82,13 +82,17 @@ const CONFIG = deepFreeze({
   // [manual] Standard: the colony must reach $60,000 in total. No per-colonist requirement.
   SURVIVAL: { combined: 60000 },
   // [manual] "The last place player will move first if there are less than 7 M.U.L.E.s in the corral". Exactly 7 is unspecified.
-  DEV: { lowCorral: 7 },
-  // Walking during development. All [PROVISIONAL] (speeds, slow terrain, house radius): not measured on the C64 yet.
+  // countdownMs: not C64-sourced — a "get ready" warning shown before the human's development slot starts, so the walk and its
+  // clock never begin while the player is still getting their bearings (see the modal in MapScreen.drawTurnCountdown).
+  DEV: { lowCorral: 7, countdownMs: 3000 },
+  // Walking during development. Speeds/slow terrain [PROVISIONAL], not measured on the C64 yet.
   // [manual] river and mountains slow you down; diagonal is the fastest way to move (so the two axes are not normalised).
   // mapSpeed/townSpeed: 2/3 of the original PROVISIONAL values (0.18/0.3), per playtesting feedback, still PROVISIONAL.
   // installMs: not C64-sourced — our own pacing so the RUC visibly rises, gets its module and comes back down instead of installing at once.
   // fleeShuffleMs/fleeRunMs: not C64-sourced — our own flee choreography (a quick side-to-side jitter, then a dash off in a random direction).
-  WALK: { stepMs: 10, mapSpeed: 0.12, townSpeed: 0.2, slowPct: 50, houseRadius: 16, installMs: 1800, fleeShuffleMs: 400, fleeRunMs: 900 },
+  // shopRadius: not C64-sourced — how close to a shop/corral's inner counter you must walk before it acts, so a brief graze near the
+  // doorway on your way past never fires it by accident; the whole plot tile counts as "the house" (see DevWalk.atHouse).
+  WALK: { stepMs: 10, mapSpeed: 0.12, townSpeed: 0.2, slowPct: 50, shopRadius: 28, installMs: 1800, fleeShuffleMs: 400, fleeRunMs: 900 },
   DIFFICULTY: {
     relaxed: { label: 'Relaxada', reactMin: 700, reactMax: 1300, valuationErr: 15, minReserve: 2, humanTimeMs: 90000, landMsPerPlot: 500 },
     colony: { label: 'Colònia', reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3, humanTimeMs: 60000, landMsPerPlot: 400 },
@@ -1370,13 +1374,16 @@ const DevOrder = {
  * Town interior, in logical px of the map rectangle. [PROVISIONAL] layout (not the C64 geometry): a street across the town, a
  * passage from top to bottom, the three Phase A outfitting shops and the corral. No land office, assay office or pub (see README).
  */
+// `spot`: the interior counter a colonist must actually walk up to before a shop/corral visit does anything (see moveTown). It
+// sits well past the doorway, deep inside the room, so a step that only grazes the threshold while walking the street never
+// triggers a purchase by accident — reaching it takes real, visible walking time, both going in and coming back out.
 const TOWN = deepFreeze({
-  W: CONFIG.COLS * CONFIG.TILE, H: CONFIG.ROWS * CONFIG.TILE, streetTop: 170, streetBottom: 310, passX0: 384, passX1: 480, doorClear: 24,
+  W: CONFIG.COLS * CONFIG.TILE, H: CONFIG.ROWS * CONFIG.TILE, streetTop: 170, streetBottom: 310, passX0: 384, passX1: 480,
   buildings: [
-    { id: 'shop_food', kind: 'shop', res: 'food', label: 'Taller de menjar', x: 24, y: 16, w: 170, h: 154, door: 'bottom' },
-    { id: 'shop_energy', kind: 'shop', res: 'energy', label: 'Taller d\'energia', x: 204, y: 16, w: 170, h: 154, door: 'bottom' },
-    { id: 'shop_smithore', kind: 'shop', res: 'smithore', label: 'Taller de smithore', x: 490, y: 16, w: 170, h: 154, door: 'bottom' },
-    { id: 'corral', kind: 'corral', label: 'Corral de RUCs', x: 490, y: 310, w: 350, h: 154, door: 'top' }
+    { id: 'shop_food', kind: 'shop', res: 'food', label: 'Taller de menjar', x: 24, y: 16, w: 170, h: 154, door: 'bottom', spot: { x: 109, y: 66 } },
+    { id: 'shop_energy', kind: 'shop', res: 'energy', label: 'Taller d\'energia', x: 204, y: 16, w: 170, h: 154, door: 'bottom', spot: { x: 289, y: 66 } },
+    { id: 'shop_smithore', kind: 'shop', res: 'smithore', label: 'Taller de smithore', x: 490, y: 16, w: 170, h: 154, door: 'bottom', spot: { x: 575, y: 66 } },
+    { id: 'corral', kind: 'corral', label: 'Corral de RUCs', x: 490, y: 310, w: 350, h: 154, door: 'top', spot: { x: 665, y: 414 } }
   ]
 });
 
@@ -1392,7 +1399,7 @@ const DevWalk = {
   create(state, pid, timeMs) {
     return {
       pid, area: 'town', x: (TOWN.passX0 + TOWN.passX1) / 2, y: (TOWN.streetTop + TOWN.streetBottom) / 2,
-      carrying: null, latch: null, installing: null, fleeing: null, endWhy: null,
+      carrying: null, latch: null, acted: false, installing: null, fleeing: null, endWhy: null,
       timeLeft: timeMs, timeTotal: timeMs, acc: 0, ended: null, msg: '', bad: false, log: [], seq: 0
     };
   },
@@ -1400,8 +1407,11 @@ const DevWalk = {
     const c = clamp(Math.floor(x / CONFIG.TILE), 0, CONFIG.COLS - 1); const r = clamp(Math.floor(y / CONFIG.TILE), 0, CONFIG.ROWS - 1);
     return state.plots[r * CONFIG.COLS + c];
   },
-  houseOf(plot) { return { x: plot.x * CONFIG.TILE + CONFIG.TILE / 2, y: plot.y * CONFIG.TILE + CONFIG.TILE / 2 }; },
-  atHouse(w, plot) { const h = this.houseOf(plot); return Math.abs(w.x - h.x) <= CONFIG.WALK.houseRadius && Math.abs(w.y - h.y) <= CONFIG.WALK.houseRadius; },
+  /** "At the house" = anywhere on that plot's own tile — the whole square, not a small spot at its centre. */
+  atHouse(w, plot) {
+    const px = plot.x * CONFIG.TILE; const py = plot.y * CONFIG.TILE;
+    return w.x >= px && w.x < px + CONFIG.TILE && w.y >= py && w.y < py + CONFIG.TILE;
+  },
   inTownFloor(x, y) { return (y >= TOWN.streetTop && y <= TOWN.streetBottom) || (x >= TOWN.passX0 && x <= TOWN.passX1); },
   buildingAt(x, y) { return TOWN.buildings.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) || null; },
   speed(state, w) {
@@ -1429,11 +1439,8 @@ const DevWalk = {
   move(state, w, dir) {
     const d = this.speed(state, w) * CONFIG.WALK.stepMs;
     const nx = w.x + dir.x * d; const ny = w.y + dir.y * d;
+    // Latch/spot bookkeeping for buildings lives entirely in moveTown now (entering and leaving are both free, gradual movement).
     if (w.area === 'town') this.moveTown(state, w, nx, ny); else this.moveMap(state, w, nx, ny);
-    if (w.latch) {
-      const b = TOWN.buildings.find((x) => x.id === w.latch); const doorY = b.door === 'bottom' ? b.y + b.h : b.y;
-      if (w.area !== 'town' || Math.abs(w.y - doorY) > TOWN.doorClear || w.x < b.x || w.x > b.x + b.w) w.latch = null;
-    }
   },
   moveMap(state, w, nx, ny) {
     nx = clamp(nx, 0, TOWN.W - 0.01); ny = clamp(ny, 0, TOWN.H - 0.01);
@@ -1459,18 +1466,26 @@ const DevWalk = {
       // Leaving through an open edge: back on the map, just outside the town tile.
       const sy = clamp((w.y - TOWN.streetTop) / (TOWN.streetBottom - TOWN.streetTop), 0, 1);
       const sx = clamp((w.x - TOWN.passX0) / (TOWN.passX1 - TOWN.passX0), 0, 1);
-      w.area = 'map';
+      w.area = 'map'; w.latch = null; w.acted = false;
       if (nx < 0) { w.x = t.x - 1; w.y = t.y + sy * (t.h - 1); } else if (nx > TOWN.W) { w.x = t.x + t.w; w.y = t.y + sy * (t.h - 1); } else if (ny < 0) { w.y = t.y - 1; w.x = t.x + sx * (t.w - 1); } else { w.y = t.y + t.h; w.x = t.x + sx * (t.w - 1); }
       return;
     }
     const b = this.buildingAt(nx, ny);
-    if (b && b.id !== w.latch) {
-      // All the way in: the building acts once and the colonist comes back out to its doorway.
-      this.enter(state, w, b);
-      w.x = clamp(nx, b.x, b.x + b.w); w.y = b.door === 'bottom' ? b.y + b.h + 12 : b.y - 12;
+    if (b) {
+      // Free movement inside the room: walking in and back out both take real, visible steps — nothing teleports. `nx, ny`
+      // already sit inside `b`'s bounds (that's how we got here), so no further clamping is needed; a clamp that insets away
+      // from the exact boundary would only pin the colonist just inside it and stop the door threshold from ever being crossed
+      // again on the way out. The visit only acts once, when the colonist actually reaches the inner counter (`b.spot`, `enter`).
+      w.x = nx; w.y = ny;
+      if (w.latch !== b.id) { w.latch = b.id; w.acted = false; }
+      if (!w.acted && Math.abs(w.x - b.spot.x) <= CONFIG.WALK.shopRadius && Math.abs(w.y - b.spot.y) <= CONFIG.WALK.shopRadius) {
+        w.acted = true;
+        this.enter(state, w, b);
+      }
       return;
     }
-    if (!b && this.inTownFloor(nx, ny)) { w.x = nx; w.y = ny; return; }
+    if (w.latch) { w.latch = null; w.acted = false; }
+    if (this.inTownFloor(nx, ny)) { w.x = nx; w.y = ny; return; }
     // Walls (and the building just left): slide along them.
     if (!this.buildingAt(nx, w.y) && this.inTownFloor(nx, w.y)) { w.x = nx; return; }
     if (!this.buildingAt(w.x, ny) && this.inTownFloor(w.x, ny)) w.y = ny;
@@ -1808,11 +1823,11 @@ class MapScreen {
         if (fx && fx.draw) fx.draw(ctx, x, y);
       }
       if (w && p.ownerId === w.pid) {
-        // The house: the exact spot where the action button installs or picks up a RUC.
-        const R = CONFIG.WALK.houseRadius; const cx = x + T / 2; const cy = y + T / 2; const on = DevWalk.atHouse(w, p);
-        ctx.fillStyle = on ? 'rgba(255,179,71,0.55)' : 'rgba(6,9,18,0.55)'; ctx.fillRect(cx - R, cy - R, 2 * R, 2 * R);
-        ctx.strokeStyle = on ? '#fff' : COL.amber; ctx.lineWidth = on ? 3 : 2; ctx.strokeRect(cx - R + 0.5, cy - R + 0.5, 2 * R - 1, 2 * R - 1);
-        ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(cx, cy - 8); ctx.lineTo(cx + 8, cy); ctx.closePath(); ctx.fillStyle = on ? '#fff' : COL.amber; ctx.fill();
+        // The house: the whole tile counts, not just its centre — being anywhere on your own plot is enough to install/retire a RUC.
+        const cx = x + T / 2; const cy = y + T / 2; const on = DevWalk.atHouse(w, p);
+        ctx.fillStyle = on ? 'rgba(255,179,71,0.28)' : 'rgba(255,179,71,0.07)'; ctx.fillRect(x + 3, y + 3, T - 6, T - 6);
+        ctx.strokeStyle = on ? '#fff' : COL.amber; ctx.lineWidth = on ? 3 : 2; ctx.strokeRect(x + 3.5, y + 3.5, T - 7, T - 7);
+        ctx.beginPath(); ctx.moveTo(cx - 8, cy + 5); ctx.lineTo(cx, cy - 7); ctx.lineTo(cx + 8, cy + 5); ctx.closePath(); ctx.fillStyle = on ? '#fff' : COL.amber; ctx.fill();
       }
     });
   }
@@ -1840,6 +1855,11 @@ class MapScreen {
         r.text('Entra: compra un RUC', bx + 120, by + 78, { size: 16, color: COL.dim, maxW: b.w - 130 });
         r.text('o retorna el teu', bx + 120, by + 100, { size: 16, color: COL.dim, maxW: b.w - 130 });
       }
+      // The counter you must actually reach: a quiet ring normally, bright and pulsing once you are inside and haven't acted yet.
+      const sx = X + b.spot.x; const sy = Y + b.spot.y; const walk = game.humanWalk(); const active = !!(walk && walk.latch === b.id && !walk.acted);
+      const pulse = active && !game.settings.reduceMotion ? Math.sin(game.now / 150) * 3 : 0;
+      c.strokeStyle = active ? '#fff' : 'rgba(255,255,255,0.25)'; c.lineWidth = active ? 3 : 1.5;
+      c.beginPath(); c.arc(sx, sy, CONFIG.WALK.shopRadius * 0.6 + pulse, 0, Math.PI * 2); c.stroke();
     });
   }
   /** Colonist portrait + identity dot, drawn in place at (X, Y): shared by the normal, installing and fleeing renders. */
@@ -1945,6 +1965,7 @@ class MapScreen {
     const slot = game.devSlot();
     if (game.turns.phase === 'PLANET_EVENT') this.drawEventCards(game, r, game.turns.phaseData.items || [], 'Cap esdeveniment planetari aquest torn.');
     else if (slot && slot.stage === 'card') this.drawEventCards(game, r, [slot.event], '');
+    else if (slot && slot.stage === 'countdown') this.drawTurnCountdown(game, r, slot);
     const ptr = game.input.pointer; const under = inTown ? null : this.plotAt(game, ptr.x, ptr.y);
     const kbd = !walk && r.focusId === 'map' && r.showFocus ? s.plots[this.cursor] : null;
     const tipPlot = under || kbd;
@@ -2051,6 +2072,21 @@ class MapScreen {
     }
     r.text(`Torn de desenvolupament de ${who.name}${dev.reversed ? ' · corral amb menys de 7 RUCs: ordre invers' : ''}`, X + 84, Y + 8, { size: 18, maxW: 770 });
     (slot.log || []).slice(0, 3).forEach((l, i) => r.text(l, X + 84, Y + 36 + i * 24, { size: 16, color: COL.dim, maxW: 770 }));
+  }
+  /**
+   * "Get ready" modal shown for CONFIG.DEV.countdownMs right before the human's development slot starts (no skip button on
+   * purpose): the walk and its clock only begin once this ends, so the turn never starts while the player is still reacting.
+   */
+  drawTurnCountdown(game, r, slot) {
+    r.dim(0.6);
+    const p = playerById(game.state, slot.pid);
+    const secs = Math.max(1, Math.ceil(slot.timer / 1000));
+    const x = 390; const y = 210; const w = 500; const h = 300;
+    r.panel(x, y, w, h, { border: COL.amber });
+    r.assetFrame('colonists_strip', x + w / 2 - 32, y + 24, 64, 64, Math.max(0, portraitFrame(p)));
+    r.text(`Comença el torn de ${p.name}`, x + w / 2, y + 104, { size: 22, color: COL.amber, align: 'center', maxW: w - 40 });
+    r.text(String(secs), x + w / 2, y + 136, { size: 72, color: COL.text, align: 'center' });
+    r.text('Prepara\'t per caminar...', x + w / 2, y + 244, { size: 18, color: COL.dim, align: 'center' });
   }
   drawEventCards(game, r, items, emptyText) {
     r.dim(0.55);
@@ -2825,6 +2861,7 @@ class Game {
         if (!w.carrying.module) return w.area === 'town' ? 'Entra a un taller per equipar el RUC.' : 'Torna al poble: el RUC s\'ha d\'equipar a un taller.';
         return w.area === 'town' ? 'Surt del poble i porta el RUC a la casa d\'una parcel·la teva.' : 'Posa\'t sobre la casa d\'una parcel·la teva i prem Acció.';
       }
+      if (slot.stage === 'countdown') return 'Prepara\'t: el teu torn comença de seguida.';
       return slot.stage === 'card' ? 'Esdeveniment individual' : `Desenvolupament: torn de ${playerById(this.state, slot.pid).name}`;
     }
     if (ph === 'PLANET_EVENT') return 'Esdeveniment planetari abans de la producció';
@@ -2860,9 +2897,9 @@ class Game {
     if (ev) { s.event.items.push(ev); this.audio.play('event'); }
     const slot = { pid, event: ev, stage: 'show', timer: 0, log: [], walk: null };
     if (p.isHuman && !this.autopilot) {
-      slot.walk = DevWalk.create(s, pid, ConsumptionSystem.humanTimeMs(s, p));
-      slot.stage = ev ? 'card' : 'walk'; slot.timer = ev ? 6000 : 0;
-      this.announce(ev ? ev.text : 'El teu torn de desenvolupament: camina fins al corral.');
+      // The walk itself (and its clock) is only created once the "get ready" countdown ends — see updateDevelopment.
+      slot.stage = ev ? 'card' : 'countdown'; slot.timer = ev ? 6000 : CONFIG.DEV.countdownMs;
+      this.announce(ev ? ev.text : `Prepara't: el teu torn de desenvolupament comença en ${Math.ceil(CONFIG.DEV.countdownMs / 1000)} s.`);
     } else {
       if (ev) slot.log.push(ev.text);
       const acts = AISystem.develop(s, this.rng, p);
@@ -2876,7 +2913,12 @@ class Game {
   updateDevelopment(dt) {
     const dev = this.turns.phaseData.dev; const slot = dev.slot;
     if (!slot) { this.startDevSlot(); return; }
-    if (slot.stage === 'card') { slot.timer -= dt; if (slot.timer <= 0) slot.stage = 'walk'; return; }
+    if (slot.stage === 'card') { slot.timer -= dt; if (slot.timer <= 0) { slot.stage = 'countdown'; slot.timer = CONFIG.DEV.countdownMs; } return; }
+    if (slot.stage === 'countdown') {
+      slot.timer -= dt;
+      if (slot.timer <= 0) { slot.stage = 'walk'; slot.walk = DevWalk.create(this.state, slot.pid, ConsumptionSystem.humanTimeMs(this.state, playerById(this.state, slot.pid))); }
+      return;
+    }
     if (slot.stage === 'walk') {
       const w = slot.walk;
       DevWalk.update(this.state, w, this.devDirs(), dt);
@@ -3119,13 +3161,13 @@ function runSelfTests() {
   const go = (state, w, dir, ms) => DevWalk.update(state, w, dir, ms);
   const goUntil = (state, w, dir, pred, max = 30000) => { for (let tt = 0; tt < max && !pred(); tt += 10) DevWalk.update(state, w, dir, 10); return pred(); };
   const midY = (TOWN.streetTop + TOWN.streetBottom) / 2; const midX = (TOWN.passX0 + TOWN.passX1) / 2;
-  /** Walks into a building through its door and back out of the doorway; returns what happened inside. */
+  /** Walks all the way in to a building's inner counter (triggering its one visit) and all the way back out; returns what happened. */
   const visit = (state, w, id) => {
     const b = TOWN.buildings.find((x) => x.id === id); const n = w.log.length;
-    goUntil(state, w, { x: 0, y: w.y < midY ? 1 : -1 }, () => Math.abs(w.y - midY) < 4);
-    goUntil(state, w, { x: Math.sign(b.x + b.w / 2 - w.x), y: 0 }, () => Math.abs(w.x - (b.x + b.w / 2)) < 4);
     const dy = b.door === 'bottom' ? -1 : 1;
-    goUntil(state, w, { x: 0, y: dy }, () => w.latch === b.id);
+    goUntil(state, w, { x: 0, y: w.y < midY ? 1 : -1 }, () => Math.abs(w.y - midY) < 4);
+    goUntil(state, w, { x: Math.sign(b.spot.x - w.x), y: 0 }, () => Math.abs(w.x - b.spot.x) < 4);
+    goUntil(state, w, { x: 0, y: dy }, () => w.acted && w.latch === b.id);
     goUntil(state, w, { x: 0, y: -dy }, () => w.latch === null);
     return w.log.slice(n);
   };
@@ -3365,11 +3407,14 @@ function runSelfTests() {
     const a = walkDirs(new Set(['ArrowUp', 'ArrowLeft'])); const b = walkDirs(new Set(), { x: -1, y: -1 }); const c = walkDirs(new Set(['ArrowLeft']), { x: 1, y: 0 });
     return a.x === -1 && a.y === -1 && b.x === -1 && b.y === -1 && c.x === 0 && c.y === 0 ? true : JSON.stringify([a, b, c]);
   });
-  t('Walk: buying needs walking into the corral; pushing against the door does not charge again', () => {
+  t('Walk: buying needs walking all the way into the corral; continuing past the counter does not charge twice', () => {
     const { state, w } = walkState(); const p = state.players[0]; const c0 = p.cash;
-    goUntil(state, w, { x: 1, y: 0 }, () => w.x >= 600);
-    go(state, w, { x: 0, y: 1 }, 3000);
+    const b = TOWN.buildings.find((x) => x.id === 'corral');
+    goUntil(state, w, { x: Math.sign(b.spot.x - w.x), y: 0 }, () => Math.abs(w.x - b.spot.x) < 4);
+    goUntil(state, w, { x: 0, y: 1 }, () => w.acted);
     if (w.log.join() !== 'buy' || !w.carrying) return `log ${w.log}`;
+    go(state, w, { x: 0, y: 1 }, 500); // keep pushing further in, past the counter
+    if (w.log.join() !== 'buy') return 'pushing further re-triggered the visit';
     return p.cash === c0 - w.carrying.paid && state.store.ruc === 15 ? audited(state, 1) : `cash ${p.cash}`;
   });
   t('Walk: outfitting for food, energy or smithore needs walking into that shop, paid once', () => {
@@ -3422,7 +3467,33 @@ function runSelfTests() {
     go(state, w, { x: 0, y: 0 }, 150);
     return !w.fleeing ? audited(state) : 'flee animation never resolved';
   });
-  t('Walk: no remote development (no panel API, the button does nothing in town); unoutfitted, foreign plot or away from the house never installs', () => {
+  t('Shop entry is not instant: a brief graze past the doorway does not trigger a purchase or re-outfit', () => {
+    const { state, w } = walkState(); const p = state.players[0]; const cash0 = p.cash; const ruc0 = state.store.ruc;
+    goUntil(state, w, { x: 0, y: w.y < midY ? 1 : -1 }, () => Math.abs(w.y - midY) < 4);
+    goUntil(state, w, { x: Math.sign(109 - w.x), y: 0 }, () => Math.abs(w.x - 109) < 4);
+    goUntil(state, w, { x: 0, y: -1 }, () => w.y <= TOWN.streetTop + 1); // right up against shop_food's doorway
+    go(state, w, { x: 0, y: -1 }, 80); // a small nudge past the threshold — far short of the counter (104 px further in)
+    if (!w.latch) return 'test setup: did not even touch the building';
+    go(state, w, { x: 0, y: 1 }, 80); // straight back out before reaching it
+    return !w.acted && !w.carrying && state.store.ruc === ruc0 && p.cash === cash0 && w.log.length === 0 ? true : `grazing acted: log ${w.log}, cash ${p.cash}, corral ${state.store.ruc}`;
+  });
+  t('Human turn countdown: a 3 s "get ready" modal runs before the walk starts; its clock is untouched until then', () => {
+    const g = mkGame(); g.newGame({ seed: 'countdown-1', difficulty: 'relaxed' });
+    let guard = 0;
+    while (guard++ < 200000 && !(g.turns.phase === 'DEVELOPMENT' && g.devSlot() && g.devSlot().pid === 'p0' && g.devSlot().stage !== 'card')) {
+      const s = g.devSlot(); if (s && s.stage === 'card') g.devSkipCard();
+      g.tick(50);
+    }
+    const slot = g.devSlot();
+    if (!slot || slot.pid !== 'p0' || slot.stage !== 'countdown' || g.humanWalk()) return `expected the human's countdown, got phase ${g.turns.phase} stage ${slot && slot.stage}`;
+    for (let i = 0; i < Math.floor(CONFIG.DEV.countdownMs / 50) - 2; i++) g.tick(50);
+    if (g.humanWalk()) return 'the walk started before the 3 s countdown finished';
+    for (let i = 0; i < 4; i++) g.tick(50);
+    const w = g.humanWalk();
+    // A little slack: some of these 4 ticks land after the walk was already created and ticking down its own clock.
+    return w && w.timeTotal - w.timeLeft <= 200 ? true : `walk did not start with a fresh clock (${JSON.stringify(w)})`;
+  });
+  t('Walk: no remote development (no panel API, the button does nothing in town); unoutfitted or a foreign plot never installs', () => {
     if (['humanPickPlot', 'confirmInstall', 'chooseModule', 'buyRuc', 'returnRuc', 'canInstall'].some((m) => typeof Game.prototype[m] === 'function')) return 'a remote development API still exists';
     let { state, w } = walkState(); LandGrantSystem.assign(state, 'p0', 31); LandGrantSystem.assign(state, 'p1', 40);
     visit(state, w, 'corral');
@@ -3431,10 +3502,11 @@ function runSelfTests() {
     if (DevWalk.act(state, w) !== null || !w.carrying || state.plots[31].ruc) return 'an unoutfitted RUC must not be installed';
     goUntil(state, w, { x: 0, y: 1 }, () => DevWalk.atHouse(w, state.plots[40]));
     if (DevWalk.act(state, w) !== 'flee' || w.carrying || state.plots[40].ruc) return 'a foreign plot must make it run away';
+    // The whole plot tile counts as home, not a small radius at its centre: landing right at the edge still installs.
     ({ state, w } = walkState('walk2')); LandGrantSystem.assign(state, 'p0', 31);
     visit(state, w, 'corral'); visit(state, w, 'shop_food'); leaveSouth(state, w);
-    if (DevWalk.atHouse(w, state.plots[31])) return 'test setup: already at the house';
-    if (DevWalk.act(state, w) !== 'flee' || state.plots[31].ruc) return '[manual] pressing away from the house makes it run away';
+    if (!DevWalk.atHouse(w, state.plots[31])) return 'the whole plot tile must count as the house, not just its centre';
+    if (install(state, w) !== 'install' || state.plots[31].ruc.module !== 'food') return 'installing from the tile edge must work';
     return audited(state);
   });
   t('Walk: changing an installed RUC = pick it up at the plot, re-outfit it in a shop (paid) and walk back to install it', () => {
