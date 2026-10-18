@@ -21,11 +21,12 @@ class GameOverScreen {
     });
     this.drawWorthChart(game, r, 60, 326, 640, 286);
     r.text('Volum per recurs', 740, 316, { size: 18, color: COL.cyan });
-    auctionResources().forEach((d, i) => {
+    const res = auctionResources(s);
+    res.forEach((d, i) => {
       const log = s.auctionLog.filter((x) => x.res === d.id); const vol = log.reduce((a, b) => a + b.volume, 0);
       r.icon(d.id, 740, 346 + i * 36, 24); r.text(`${d.label}: ${vol} unitats`, 774, 348 + i * 36, { size: 18 });
     });
-    r.wrap(`Patrimoni: efectiu + béns (al preu de la botiga) + ${CONFIG.PLOT_VALUE}/parcel·la + RUCs instal·lats (${CONFIG.RUC_WORTH} + cost del mòdul). Sense cap deute.`, 740, 470, 480, 22, { size: 16, color: COL.dim });
+    r.wrap(`Patrimoni: efectiu + béns (al preu de la botiga) + ${CONFIG.PLOT_VALUE}/parcel·la + RUCs instal·lats (${CONFIG.RUC_WORTH} + cost del mòdul). Sense cap deute.`, 740, 360 + res.length * 36, 480, 22, { size: 16, color: COL.dim });
     const again = (seed) => game.newGame({ seed, level: s.level, species: s.players[0].species, playerName: s.players[0].name, colorId: colorIdOf(s.players[0].color) });
     r.button('g-same', 'Repetir llavor', 60, 630, 240, 52, { onClick: () => again(s.seed) });
     r.button('g-new', 'Nova llavor', 320, 630, 240, 52, { primary: true, onClick: () => again(game.randomSeed()) });

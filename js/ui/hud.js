@@ -23,8 +23,9 @@ const Hud = {
     r.text(label, 16, 31, { size: 16, color: COL.cyan, maxW: 300 });
     r.text(fmtCr(human.cash), 330, 8, { size: 20, color: COL.amber });
     r.text('efectiu', 330, 32, { size: 16, color: COL.dim });
-    enabledResources().forEach((d, i) => {
-      const x = 470 + i * 96;
+    const res = enabledResources(s); const gap = res.length > 3 ? 72 : 96;
+    res.forEach((d, i) => {
+      const x = 470 + i * gap;
       r.icon(d.id, x, 12, 32);
       r.text(String(human.inventory[d.id]), x + 38, 16, { size: 20 });
     });

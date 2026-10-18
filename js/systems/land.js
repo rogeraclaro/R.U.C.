@@ -28,7 +28,8 @@ const LandGrantSystem = {
     else s += p.terrain === TERRAIN.PLAIN ? 4 : p.terrain === TERRAIN.RIVER ? 3.5 : 2.5 + p.richness * 0.8;
     if (foodCapable < 2 && p.terrain !== TERRAIN.MOUNTAIN) s += 2;
     s += Plot.neighbours(state.plots, p).filter((n) => n.ownerId === player.id).length * 0.8;
-    return s;
+    // Tournament: [Atari code] known crystite counts in the computers' plot ratings (CrystiteSystem.rating; 0 elsewhere).
+    return s + CrystiteSystem.rating(state, p);
   }
 };
 

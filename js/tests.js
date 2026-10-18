@@ -251,11 +251,11 @@ function runSelfTests() {
   });
 
   /* ---------- P1.5 store ---------- */
-  t('Start: [Atari code][C64] colonists 4 food / 2 energy; store 8 food / 8 energy / 8 smithore, 14 RUCs (cap 14); modules 25/50/75; plot 500', () => {
+  t('Start: [Atari code][C64] colonists 4 food / 2 energy; store 8 food / 8 energy / 8 smithore, 14 RUCs (cap 14); modules 25/50/75 (crystite 100); plot 500', () => {
     const { state } = fresh(); const st = state.store;
     if (!state.players.every((p) => `${p.inventory.food}/${p.inventory.energy}/${p.inventory.smithore}` === '4/2/0')) return `colonists ${JSON.stringify(state.players.map((p) => p.inventory))}`;
     const got = `${st.stock.food}/${st.stock.energy}/${st.stock.smithore}/${st.ruc}/${CONFIG.RUC_MAX}/${Object.values(CONFIG.MODULE_COST).join('-')}/${CONFIG.PLOT_VALUE}`;
-    return eq(got, '8/8/8/14/14/25-50-75/500', 'store');
+    return eq(got, '8/8/8/14/14/25-50-75-100/500', 'store');
   });
   t('Store: [Atari code] builds min(14 - corral, floor(smithore / 2)) RUCs between turns, 2 smithore each; no free food/energy restock', () => {
     const { state, rng } = fresh('fab');
@@ -518,11 +518,11 @@ function runSelfTests() {
 
   /* ---------- town, pub, land office, species, levels (fidelity batches 3 and 5) ---------- */
   t('Town: [C64] top row crystite (closed) / smithore / energy / food; bottom row assay (closed) / land office / pub / corral', () => {
-    const row = (top) => TOWN.buildings.filter((b) => (b.y < TOWN.streetTop) === top).sort((a, b) => a.x - b.x).map((b) => `${b.id}${b.kind === 'closed' ? '*' : ''}`).join();
+    const { state } = fresh('signs');
+    const row = (top) => TOWN.buildings.filter((b) => (b.y < TOWN.streetTop) === top).sort((a, b) => a.x - b.x).map((b) => `${b.id}${DevWalk.kind(state, b) === 'closed' ? '*' : ''}`).join();
     const top = row(true); const bottom = row(false);
     if (top !== 'shop_crystite*,shop_smithore,shop_energy,shop_food') return `top ${top}`;
     if (bottom !== 'assay*,land_office,pub,corral') return `bottom ${bottom}`;
-    const { state } = fresh('signs');
     return MapScreen.corralSign(state) === 'RUCs 100 cr' && MapScreen.moneyLine(state.players[0]) === 'Els teus diners: 1000 cr' ? true : `${MapScreen.corralSign(state)} / ${MapScreen.moneyLine(state.players[0])}`;
   });
   t('Town: the closed crystite shop and assay office have no door — pushing at them does nothing', () => {
@@ -595,10 +595,11 @@ function runSelfTests() {
       const bad = audited(state); if (bad !== true) return `${sp}: ${bad}`;
     }
   });
-  t('Levels: Principiant (6 rounds) and Estàndard (12, default); Torneig disabled; one AI level (no difficulty knobs)', () => {
+  t('Levels: Principiant (6 rounds), Estàndard (12, default) and Torneig (12); one AI level (no difficulty knobs)', () => {
     if (Object.keys(CONFIG.LEVELS).join() !== 'beginner,standard,tournament') return Object.keys(CONFIG.LEVELS).join();
     if (CONFIG.LEVELS.beginner.label !== 'Principiant' || CONFIG.LEVELS.standard.label !== 'Estàndard' || CONFIG.LEVELS.tournament.label !== 'Torneig') return 'labels';
-    if (!CONFIG.LEVELS.tournament.disabled || CONFIG.LEVELS.standard.disabled || CONFIG.LEVELS.beginner.disabled) return 'only Torneig is disabled';
+    if (Object.values(CONFIG.LEVELS).some((L) => L.disabled)) return 'a level is disabled';
+    if (lastRound(fresh('lv', 'tournament').state) !== 12) return 'tournament rounds';
     const { state } = GameState.create({ seed: 'lv' });
     if (state.level !== 'standard' || lastRound(state) !== 12 || 'difficulty' in state) return `default ${state.level}`;
     if (lastRound(fresh('lv', 'beginner').state) !== 6) return 'beginner rounds';
@@ -632,11 +633,9 @@ function runSelfTests() {
   });
 
   /* ---------- P1.7 auctions ---------- */
-  t('Auction order: [manual] smithore -> food -> energy; crystite would go second with no engine change (still off)', () => {
-    if (auctionResources().map((d) => d.id).join() !== 'smithore,food,energy') return auctionResources().map((d) => d.id).join();
-    const defs = Object.assign({}, RESOURCE_DEFS, { crystite: Object.assign({}, RESOURCE_DEFS.crystite, { enabled: true }) });
-    FEATURES.crystite = true;
-    try { const ids = auctionResources(defs).map((d) => d.id).join(); if (ids !== 'smithore,crystite,food,energy') return ids; } finally { FEATURES.crystite = false; }
+  t('Auction order: [manual] smithore -> food -> energy; crystite goes second in Tournament with no engine change', () => {
+    if (auctionResources(fresh().state).map((d) => d.id).join() !== 'smithore,food,energy') return auctionResources(fresh().state).map((d) => d.id).join();
+    const ids = auctionResources(fresh('ao', 'tournament').state).map((d) => d.id).join(); if (ids !== 'smithore,crystite,food,energy') return ids;
     const phases = mkGame().turns.phases.map((p) => p.id).filter((id) => id.startsWith('AUCTION_')).join();
     return eq(phases, 'AUCTION_smithore,AUCTION_food,AUCTION_energy', 'phase order');
   });
@@ -834,11 +833,11 @@ function runSelfTests() {
     e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 200); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 250); runEngine(e, 1000);
     return e.volume === 1 && plot.ownerId === 'p0' ? true : 'plot did not change owner';
   });
-  t('Phase B stays off (crystite); the wampus has no flag; land auctions are on; crystite disabled and not auctioned, hidden deposits kept', () => {
-    const ids = enabledResources().map((d) => d.id).join();
-    if (ids !== 'food,energy,smithore') return `enabled ${ids}`;
-    if (RESOURCE_DEFS.crystite.enabled || !('hiddenDeposit' in fresh().state.plots[0])) return 'crystite / hiddenDeposit';
-    return FEATURES.crystite === false && !('wampus' in FEATURES) && FEATURES.landAuctions === true ? true : 'feature flags';
+  t('Feature flags: crystite and land auctions on (crystite only plays in Tournament); the wampus has no flag; hidden deposits on every plot', () => {
+    const ids = enabledResources(fresh().state).map((d) => d.id).join();
+    if (ids !== 'food,energy,smithore') return `Standard enabled ${ids}`;
+    if (!('hiddenDeposit' in fresh().state.plots[0])) return 'hiddenDeposit';
+    return FEATURES.crystite === true && !('wampus' in FEATURES) && FEATURES.landAuctions === true ? true : 'feature flags';
   });
 
   /* ---------- Batch 4: land auctions ---------- */
@@ -1463,8 +1462,8 @@ function runSelfTests() {
   });
 
   /* ---------- saves, conservation, determinism, engine ---------- */
-  t('Save: schema 7 round trip keeps state (level, species, land sales, land-auction prices, store prices, event bag) and PRNG; schemas 1-6 (old rules) and corrupt saves are refused', () => {
-    if (CONFIG.SCHEMA_VERSION !== 7) return `schema ${CONFIG.SCHEMA_VERSION}`;
+  t('Save: schema 8 round trip keeps state (level, species, land sales, land-auction prices, store prices, event bag) and PRNG; schemas 1-7 (old rules) and corrupt saves are refused', () => {
+    if (CONFIG.SCHEMA_VERSION !== 8) return `schema ${CONFIG.SCHEMA_VERSION}`;
     const { state, rng } = fresh('save'); rng.next(); rng.next();
     state.turn = 4; state.phase = 'DEVELOPMENT'; state.storePrice.food = 33; state.events.bag.pirates = 1; state.events.used[13] = 1; state.landAuction.lastAvg = 222;
     const text = SaveSystem.serialize(state, rng);
@@ -1477,7 +1476,7 @@ function runSelfTests() {
     if (back.state.events.bag.pirates !== 1 || back.state.events.used[13] !== 1) return 'event bag / used flags lost';
     if (back.state.level !== 'standard' || back.state.players[0].species !== 'mechtron' || !Array.isArray(back.state.landSales)) return 'level / species / land sales lost';
     if (back.state.landAuction.lastAvg !== 222) return 'land-auction price lost';
-    for (const v of [1, 2, 3, 4, 5, 6]) {
+    for (const v of [1, 2, 3, 4, 5, 6, 7]) {
       const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: v, turn: 3 }));
       if (!old.incompatible || old.reason !== 'old_rules') return `schema ${v}: ${JSON.stringify(old)}`;
     }
@@ -1651,6 +1650,298 @@ function runSelfTests() {
     if (f.rank.length !== 4 || f.rating !== ScoringSystem.rating(f.combined) || (f.rating >= 3 ? !f.winnerId : f.winnerId !== null)) return JSON.stringify(f);
     const trades = a.state.auctionLog.reduce((s, x) => s + x.volume, 0);
     console.log(`SELFTEST full game full-1: colony ${f.combined} cr (${f.survives ? 'success' : 'failure'}), ${trades} units traded, RUCs made ${a.state.rucs.made}, lost ${a.state.rucs.lost}`);
+    return audited(a.state);
+  });
+
+  /* ---------- Batch 8: Tournament (crystite, assay office, collusion) ---------- */
+  const T_LVL = 'tournament';
+  /** Manhattan distance between two plot ids on the 9 x 5 map. */
+  const plotDist = (a, b) => Math.abs(a % CONFIG.COLS - b % CONFIG.COLS) + Math.abs(Math.floor(a / CONFIG.COLS) - Math.floor(b / CONFIG.COLS));
+  const noMining = (id) => id % CONFIG.COLS === CONFIG.RIVER_COL;
+  t('Tournament: [Atari code] enabled, 12 rounds, cursor 3 BTU, ATU 25, computers $1200 (humans by species), variation amplitude 2 (+-4)', () => {
+    if (CONFIG.LEVELS.tournament.disabled) return 'Torneig still disabled';
+    const r = levelRules({ level: T_LVL });
+    if (r.rounds !== 12 || r.cursorFrames !== 12 || r.auctionAtu !== 25 || !r.crystite || !r.collusion) return JSON.stringify(r);
+    const { state } = GameState.create({ seed: 'tour', level: T_LVL, species: 'flapper' });
+    if (state.level !== T_LVL) return `level ${state.level}`;
+    if (state.players[0].cash !== 1600 || state.players.slice(1).some((p) => p.cash !== 1200)) return `cash ${state.players.map((p) => p.cash)}`;
+    if (state.store.stock.crystite !== 0 || state.players.some((p) => p.inventory.crystite !== 0)) return 'crystite stocks';
+    if (fresh('std').state.players[1].cash !== 1000) return 'Standard computers changed';
+    const rng = new SeededRNG('tvar'); const n = 40000; const k = {};
+    for (let i = 0; i < n; i++) { const v = ProductionSystem.variation(state, rng); k[v] = (k[v] || 0) + 1; }
+    if (Object.keys(k).some((v) => Math.abs(v) > 4)) return `beyond +-4: ${Object.keys(k)}`;
+    const pct = (v) => 100 * (k[v] || 0) / n;
+    return Math.abs(pct(0) - 37.7) < 1.5 && Math.abs(pct(1) - 24.3) < 1.5 && Math.abs(pct(-2) - 6.2) < 1 ? audited(state) : `shares ${JSON.stringify(k)}`;
+  });
+  t('Tournament: [Atari code] colony land auctions 0..5 per round: 31.1 / 37.7 / 24.3 / 6.2 / 0.6 % (Standard keeps 0..3)', () => {
+    const { state } = fresh('tla', T_LVL); const rng = new SeededRNG('tla'); const n = 20000; const k = [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < n; i++) k[LandAuction.colonyCount(state, rng)] += 1;
+    const pct = k.map((x) => 100 * x / n);
+    if (Math.abs(pct[0] - 31.1) > 1.5 || Math.abs(pct[1] - 37.7) > 1.5 || Math.abs(pct[2] - 24.3) > 1.5 || Math.abs(pct[3] - 6.2) > 1) return pct.map((x) => x.toFixed(1)).join('/');
+    const s = fresh('sla').state; const r2 = new SeededRNG('sla');
+    for (let i = 0; i < 3000; i++) if (LandAuction.colonyCount(s, r2) > 3) return 'Standard above 3';
+    return true;
+  });
+  t('Crystite deposits: [Atari code] 3 HIGH seeds on distinct plots, diamond 3 - distance (higher wins), river and town -1 (Tournament only)', () => {
+    for (let i = 0; i < 40; i++) {
+      const { state } = fresh(`dep${i}`, T_LVL); const d = state.crystite;
+      if (!d || d.seeds.length !== 3 || new Set(d.seeds).size !== 3) return `seeds ${d && d.seeds}`;
+      for (const p of state.plots) {
+        const want = noMining(p.id) ? -1 : Math.max(0, ...d.seeds.map((s) => 3 - plotDist(s, p.id)));
+        if (p.hiddenDeposit !== want) return `seed set ${d.seeds}: plot ${p.id} has ${p.hiddenDeposit}, expected ${want}`;
+      }
+    }
+    if (JSON.stringify(fresh('same', T_LVL).state.plots) !== JSON.stringify(fresh('same', T_LVL).state.plots)) return 'not seeded';
+    const s = fresh('dep-std').state;
+    return s.crystite === null && s.plots.every((p) => p.hiddenDeposit === null) ? true : 'Standard got crystite deposits';
+  });
+  t('Crystite: enabled only in Tournament (resources, auctions $4 steps, outfit $100); Standard and Beginner stay without it', () => {
+    const ids = (st) => enabledResources(st).map((d) => d.id).join();
+    if (ids(fresh('a').state) !== 'food,energy,smithore' || ids(fresh('b', 'beginner').state) !== 'food,energy,smithore' || ids(null) !== 'food,energy,smithore') return 'crystite leaked';
+    const ts = fresh('c', T_LVL).state;
+    if (ids(ts) !== 'food,energy,smithore,crystite') return ids(ts);
+    if (auctionResources(ts).map((d) => d.id).join() !== 'smithore,crystite,food,energy') return auctionResources(ts).map((d) => d.id).join();
+    const m = AuctionEngine.fungibleMarket(RESOURCE_DEFS.crystite);
+    return m.step === 4 && CONFIG.MODULE_COST.crystite === 100 && RESOURCE_DEFS.crystite.basePrice === 100 ? true : `step ${m.step}, outfit ${CONFIG.MODULE_COST.crystite}`;
+  });
+  t('Crystite production: [Atari code] deposit level + adjacency + learning curve + variation, needs 1 energy, none in the river, spoils above 50', () => {
+    const { state, rng } = fresh('cprod', T_LVL); state.turn = 3;
+    const a = develop(state, 'p1', 0, 'crystite'); const b = develop(state, 'p1', 1, 'crystite'); const c = develop(state, 'p1', 18, 'crystite');
+    a.hiddenDeposit = 2; b.hiddenDeposit = 0; c.hiddenDeposit = 3;
+    // a: 2 + adjacency 1 + learning 1 (3 crystite plots) = 4; b (NONE): 0 + 1 + 1 = 2.
+    if (ProductionSystem.meanYield(state, a) !== 4 || ProductionSystem.meanYield(state, b) !== 2 || ProductionSystem.meanYield(state, c) !== 4) return `means ${[a, b, c].map((q) => ProductionSystem.meanYield(state, q))}`;
+    const river = develop(state, 'p2', 13, 'crystite');
+    if (ProductionSystem.meanYield(state, river) !== 0 || ProductionSystem.rollYield(state, river, rng) !== 0) return 'river produced crystite';
+    setInv(state, 'p1', 'energy', 0); setInv(state, 'p1', 'crystite', 53);
+    const st = SettlementSystem.run(state, rng); const row = st.rows.find((x) => x.playerId === 'p1');
+    if (row.produced.crystite !== 0 || row.stopped !== 3) return `unpowered crystite produced ${row.produced.crystite}`;
+    if (row.spoiled.crystite !== 3 || row.final.crystite !== 50) return `spoilage ${row.spoiled.crystite}, final ${row.final.crystite}`;
+    return audited(state);
+  });
+  t('Crystite store: [Atari code] P = 50 + rand(0..99) each round; buys at P rounded down to $4, sells at that + 140; Standard untouched', () => {
+    const { state, rng } = fresh('cprice', T_LVL); const d = RESOURCE_DEFS.crystite; const seen = new Set();
+    if (StoreSystem.bid(state, d) !== 100 || StoreSystem.ask(state, d) !== 240) return `round 1 ${StoreSystem.bid(state, d)}/${StoreSystem.ask(state, d)}`;
+    for (let i = 0; i < 600; i++) {
+      state.turn = 1 + (i % 11); StoreSystem.updatePrices(state, rng); const P = state.storePrice.crystite; seen.add(P);
+      if (P < 50 || P > 149) return `P ${P}`;
+      if (StoreSystem.bid(state, d) !== P - P % 4 || StoreSystem.ask(state, d) !== P - P % 4 + 140) return `P ${P}: ${StoreSystem.bid(state, d)}/${StoreSystem.ask(state, d)}`;
+      // The auction's market must draw the same store lines (on the $4 grid, so the markers can meet them).
+      const m = AuctionEngine.fungibleMarket(d);
+      if (StoreSystem.bid(state, m) !== StoreSystem.bid(state, d) || StoreSystem.ask(state, m) % 4) return `market lines ${StoreSystem.bid(state, m)}/${StoreSystem.ask(state, m)}`;
+    }
+    if (!seen.has(50) || !seen.has(149) || seen.size < 95) return `draws ${seen.size}`;
+    const s = fresh('cprice-std'); s.state.turn = 2; StoreSystem.updatePrices(s.state, s.rng);
+    return s.state.storePrice.crystite === 100 ? true : 'Standard crystite price moved';
+  });
+  t('Crystite score: [Atari code] crystite valued at the store price P; a crystite plot = 500 + 100 outfit + 35', () => {
+    const { state } = fresh('cscore', T_LVL); develop(state, 'p0', 0, 'crystite'); setInv(state, 'p0', 'crystite', 3); state.storePrice.crystite = 120;
+    const b = ScoringSystem.breakdown(state, state.players[0]);
+    const goods = 4 * state.storePrice.food + 2 * state.storePrice.energy + 3 * 120;
+    return b.inventory === goods && b.plots === 500 && b.modules === 100 && b.rucs === 35 ? true : JSON.stringify(b);
+  });
+  t('Crystite auction: [Atari code] after smithore, only when someone holds crystite; the store buys and then ships it all off planet', () => {
+    const ph = (lvl) => { const g = mkGame(); g.newGame({ seed: 'cauc', level: lvl }); return g.turns.phases.map((p) => p.id).filter((id) => id.startsWith('AUCTION_')).join(); };
+    if (ph(T_LVL) !== 'AUCTION_smithore,AUCTION_crystite,AUCTION_food,AUCTION_energy') return ph(T_LVL);
+    if (ph('standard') !== 'AUCTION_smithore,AUCTION_food,AUCTION_energy') return `standard ${ph('standard')}`;
+    const tick = (G, pred, max = 60000) => { for (let i = 0; i < max && !pred(); i++) { const p = G.turns.phase; if (G.turns.phaseData.skippable && p && !p.startsWith('AUCTION_')) G.skipPhase(); G.tick(50); } return pred(); };
+    const g = mkGame(); g.autopilot = true; g.newGame({ seed: 'cauc', level: T_LVL });
+    if (!tick(g, () => g.turns.phase === 'AUCTION_food')) return `stuck in ${g.turns.phase}`;
+    if (g.state.auctionLog.some((x) => x.res === 'crystite')) return 'a crystite auction ran with no crystite anywhere';
+    if (!tick(g, () => g.turns.phase === 'AUCTION_smithore')) return `round 2 stuck in ${g.turns.phase}`;
+    // [Atari code] with P < 100 a computer sells only what it needs to reach $1000 (or the excess over 50): give it a reason to sell.
+    setInv(g.state, 'p1', 'crystite', 6); setCash(g.state, 'p1', 100);
+    if (!tick(g, () => g.turns.phase === 'AUCTION_crystite' && !!g.rt.auction && g.rt.auction.res === 'crystite')) return 'no crystite auction';
+    const e = g.rt.auction.engine;
+    if (e.entry('p1').role !== ROLE.SELLER && !tick(g, () => e.entry('p1').role === ROLE.SELLER, 200)) return `p1 role ${e.entry('p1').role}`;
+    if (!tick(g, () => g.turns.phase === 'AUCTION_food')) return 'crystite auction never ended';
+    const log = g.state.auctionLog.filter((x) => x.res === 'crystite');
+    if (log.length !== 1 || !(log[0].volume > 0)) return `log ${JSON.stringify(log)}`;
+    return g.state.store.stock.crystite === 0 ? audited(g.state) : `store kept ${g.state.store.stock.crystite} crystite`;
+  });
+  t('Town (Tournament): the crystite shop and the assay office open; outfitting a RUC for crystite costs $100', () => {
+    const { state } = fresh('ctown', T_LVL); const std = fresh('ctown').state;
+    const kinds = (st) => ['shop_crystite', 'assay'].map((id) => DevWalk.kind(st, TOWN.buildings.find((b) => b.id === id))).join();
+    if (kinds(std) !== 'closed,closed') return `Standard ${kinds(std)}`;
+    if (kinds(state) !== 'shop,assay') return `Tournament ${kinds(state)}`;
+    const w = DevWalk.create(state, 'p0', 60000); const cash = state.players[0].cash; const ruc = StoreSystem.rucPrice(state);
+    visit(state, w, 'corral'); const log = visit(state, w, 'shop_crystite');
+    if (log.join() !== 'outfit' || !w.carrying || w.carrying.module !== 'crystite') return `outfit ${log} ${JSON.stringify(w.carrying)}`;
+    return state.players[0].cash === cash - ruc - 100 ? audited(state, 1) : `paid ${cash - state.players[0].cash}`;
+  });
+  t('Assay office (human): [Atari code] the C64 procedure and messages; a river sample reads "No" (fix); level 4 reads "Molt"; results remembered', () => {
+    const { state } = fresh('assay', T_LVL); const w = DevWalk.create(state, 'p0', 120000);
+    const say = () => w.msg;
+    visit(state, w, 'assay'); if (say() !== 'Agafa una mostra del sòl i torna.') return `request: ${say()}`;
+    visit(state, w, 'assay'); if (say() !== 'Cal una mostra.') return `no sample: ${say()}`;
+    leaveSouth(state, w); // plot 31: river
+    if (DevWalk.act(state, w) !== 'sample' || say() !== 'Mostra a punt: torna a l\'oficina.') return `sample: ${say()}`;
+    standOn(state, w, 30); if (DevWalk.act(state, w) !== 'one_plot' || say() !== 'Una parcel·la per viatge.') return `2nd plot: ${say()}`;
+    standOn(state, w, 31); goUntil(state, w, { x: 0, y: -1 }, () => w.area === 'town');
+    visit(state, w, 'assay'); if (say() !== 'No crystite a la parcel·la #32.') return `river result: ${say()}`;
+    state.plots[30].hiddenDeposit = 4; visit(state, w, 'assay'); leaveSouth(state, w); standOn(state, w, 30); DevWalk.act(state, w);
+    standOn(state, w, 31); goUntil(state, w, { x: 0, y: -1 }, () => w.area === 'town');
+    visit(state, w, 'assay'); if (say() !== 'Molt crystite a la parcel·la #31.') return `meteorite plot: ${say()}`;
+    if (JSON.stringify(state.crystite.assays) !== JSON.stringify([{ pid: 'p0', plotId: 31, level: 0, turn: 0 }, { pid: 'p0', plotId: 30, level: 3, turn: 0 }])) return JSON.stringify(state.crystite.assays);
+    if (['No', 'Poc', 'Mitjà', 'Molt'].join() !== CrystiteSystem.LEVEL_NAMES.join()) return 'level names';
+    return state.plots[30].hiddenDeposit === 4 ? audited(state) : 'the true level was changed';
+  });
+  t('Assay office (computer): [Atari code] 10 + 2 x distance PTU each, stops under 22 PTU or with 3 HIGH known, skips river and known plots', () => {
+    for (let i = 0; i < 20; i++) {
+      const { state, rng } = fresh(`aia${i}`, T_LVL); state.turn = 2; const p = state.players[1];
+      const clock = { units: 101 }; const done = CrystiteSystem.aiAssay(state, rng, p, clock);
+      const known = state.crystite.known;
+      let units = 101;
+      for (const id of done) {
+        if (units < 22) return 'assayed with fewer than 22 PTU';
+        if (noMining(id)) return `assayed river/town ${id}`;
+        if (known[id] !== state.plots[id].hiddenDeposit) return `plot ${id} known ${known[id]}`;
+        units -= 10 + 2 * plotDist(id, 22);
+      }
+      if (new Set(done).size !== done.length) return 'assayed a plot twice';
+      if (units !== clock.units) return `units ${clock.units}, expected ${units}`;
+      const highs = known.filter((v) => v >= 3).length;
+      if (clock.units >= 22 && highs < 3 && done.length < 36) return `stopped early: ${clock.units} PTU, ${highs} high`;
+    }
+    const { state, rng } = fresh('aia-high', T_LVL); [0, 1, 2].forEach((id) => { state.crystite.known[id] = 3; });
+    const clock = { units: 101 };
+    if (CrystiteSystem.aiAssay(state, rng, state.players[2], clock).length || clock.units !== 101) return 'assayed with 3 HIGH known';
+    CrystiteSystem.learn(state, 20, 3);
+    if (CrystiteSystem.deduced(state, 21) !== 2 || CrystiteSystem.deduced(state, 38) !== 1) return `deduced ${CrystiteSystem.deduced(state, 21)}/${CrystiteSystem.deduced(state, 38)}`;
+    const s = fresh('aia-std'); s.state.turn = 2;
+    return AISystem.turn(s.state, s.rng, s.state.players[1]).assays.length === 0 ? true : 'a Standard computer assayed';
+  });
+  t('Tournament events: [Atari code] pirates take all players\' crystite and this round\'s crystite (smithore and store untouched); meteorite text', () => {
+    const { state, rng } = fresh('tpir', T_LVL); state.turn = 5;
+    const plot = develop(state, 'p2', 0, 'crystite'); plot.hiddenDeposit = 3; setInv(state, 'p2', 'energy', 3);
+    setInv(state, 'p1', 'crystite', 7); setInv(state, 'p1', 'smithore', 4);
+    SettlementSystem.run(state, rng);
+    const made = state.settlement.rows.find((x) => x.playerId === 'p2').produced.crystite;
+    const rec = EventSystem.build(state, rng, 'pirates', null);
+    if (state.players.some((p) => p.inventory.crystite)) return 'crystite left';
+    if (state.players[1].inventory.smithore !== 4 || state.store.stock.smithore !== 8) return 'smithore taken in Tournament';
+    const row = state.settlement.rows.find((x) => x.playerId === 'p2');
+    if (row.produced.crystite !== 0 || row.final.crystite !== 0 || (made > 0 && row.items[0].zeroed !== 'pirates')) return 'production not zeroed';
+    if (rec.params.amount !== 7 + made || !rec.text.includes('crystite')) return rec.text;
+    const m = EventSystem.build(state, rng, 'meteorite', null);
+    if (!m.text.includes('El meteorit crea un nou jaciment de crystite.')) return m.text;
+    if (state.crystite.known[m.params.plot - 1] !== 4) return 'meteorite not known to the computers';
+    const s = fresh('spir'); const ms = EventSystem.build(s.state, s.rng, 'meteorite', null);
+    return ms.text.includes('crystite') ? `Standard text: ${ms.text}` : audited(state);
+  });
+  t('Tournament AI: [Atari code] buys the store out, holds back small surpluses, trades crystite by its price rules; Standard unchanged', () => {
+    const mk = (lvl, res) => {
+      const { state, rng } = fresh(`tai-${lvl}`, lvl); state.turn = 3;
+      return { state, rng, e: engineFor(state, rng, res, state.players.map((p) => p.id), true, true) };
+    };
+    // Buy the store out: food auction, only buyers, store 10 units <= 20, the computer needs less than that.
+    let { state, rng, e } = mk(T_LVL, 'food'); const p = state.players[1];
+    setInv(state, 'p1', 'food', 1); setCash(state, 'p1', 5000); setInv(state, 'store', 'food', 10);
+    let d = AISystem.decide(state, rng, p, e, {});
+    if (d.role !== ROLE.BUYER || d.limit !== 11) return `buy out: ${JSON.stringify(d)}`;
+    ({ state, rng, e } = mk('standard', 'food'));
+    setInv(state, 'p1', 'food', 1); setCash(state, 'p1', 5000); setInv(state, 'store', 'food', 10);
+    d = AISystem.decide(state, rng, state.players[1], e, {});
+    if (d.limit === 11) return 'Standard bought the store out';
+    // Small surplus: sells only rand(0..surplus).
+    ({ state, rng, e } = mk(T_LVL, 'food')); setCash(state, 'p1', 3000);
+    const reserve = AISystem.reserve(state, state.players[1], 'food'); setInv(state, 'p1', 'food', reserve + 3);
+    const limits = new Set();
+    for (let i = 0; i < 60; i++) { const dd = AISystem.decide(state, rng, state.players[1], e, {}); if (dd.role !== ROLE.SELLER) return `surplus role ${dd.role}`; limits.add(dd.limit); }
+    if ([...limits].some((l) => l < reserve || l > reserve + 3) || limits.size < 3) return `limits ${[...limits]}`;
+    const brain = {}; const first = AISystem.decide(state, rng, state.players[1], e, brain).limit;
+    for (let i = 0; i < 10; i++) if (AISystem.decide(state, rng, state.players[1], e, brain).limit !== first) return 'the held-back amount is re-drawn every decision';
+    // Crystite.
+    ({ state, rng, e } = mk(T_LVL, 'crystite')); const c = state.players[2];
+    const cd = (inv, cash, P) => { setInv(state, 'p2', 'crystite', inv); setCash(state, 'p2', cash); state.storePrice.crystite = P; return AISystem.decide(state, rng, c, e, {}); };
+    const chk = [[cd(60, 2000, 90), ROLE.SELLER, 50], [cd(8, 500, 90), ROLE.SELLER, 2], [cd(8, 500, 120), ROLE.SELLER, 0], [cd(0, 2000, 80), ROLE.BUYER, 15], [cd(0, 2000, 90), ROLE.OUT, null], [cd(0, 1000, 80), ROLE.OUT, null], [cd(0, 9000, 40), ROLE.BUYER, 25]];
+    const bad = chk.map(([dd, role, limit], i) => (dd.role === role && dd.limit === limit ? null : `#${i} ${dd.role}/${dd.limit}`)).filter(Boolean);
+    return bad.length ? bad.join(', ') : true;
+  });
+  t('Tournament AI: rates known crystite (land, development) and learns it from assays, crystite RUCs and meteorites', () => {
+    const { state, rng } = fresh('taik', T_LVL); state.turn = 2; const p = state.players[1];
+    const plot = state.plots.find((q) => !noMining(q.id) && q.terrain === TERRAIN.PLAIN);
+    const before = LandGrantSystem.scorePlot(state, p, plot); CrystiteSystem.learn(state, plot.id, 3);
+    if (!(LandGrantSystem.scorePlot(state, p, plot) > before)) return 'known crystite does not raise the plot rating';
+    LandGrantSystem.assign(state, 'p1', plot.id); setCash(state, 'p1', 5000); setInv(state, 'p1', 'food', 20); setInv(state, 'p1', 'energy', 20);
+    const acts = AISystem.develop(state, rng, p);
+    if (!acts.some((a) => a.plotId === plot.id && a.module === 'crystite')) return `installs ${JSON.stringify(acts)}`;
+    const other = develop(state, 'p3', 44, 'crystite'); other.hiddenDeposit = 2;
+    CrystiteSystem.learnFromMules(state);
+    return state.crystite.known[44] === 2 ? audited(state) : 'did not learn from a crystite RUC';
+  });
+  t('Collusion: [Atari code] Tournament goods auctions; >= 2 humans press within 10 jiffies incl. a buyer and a seller; only they trade, store out', () => {
+    const C = CONFIG.AUCTION.collusion;
+    const setup = (lvl, roles = { p0: ROLE.BUYER, p1: ROLE.SELLER }) => {
+      const { state, rng } = fresh(`col-${lvl}`, lvl); state.players[1].isHuman = true;
+      setInv(state, 'p1', 'food', 10); setInv(state, 'p2', 'food', 10);
+      const e = engineFor(state, rng, 'food', ['p0', 'p1', 'p2', 'p3'], true, false);
+      Object.entries(Object.assign({ p2: ROLE.SELLER, p3: ROLE.BUYER }, roles)).forEach(([id, role]) => e.setRole(id, role));
+      runEngine(e, 20);
+      return { state, e };
+    };
+    let { state, e } = setup('standard'); e.collusionPress('p0'); e.collusionPress('p1');
+    if (e.collusion) return 'collusion in Standard';
+    ({ state, e } = setup(T_LVL, { p0: ROLE.BUYER, p1: ROLE.BUYER }));
+    e.collusionPress('p0'); e.collusionPress('p1'); if (e.collusion) return 'two buyers colluded';
+    ({ state, e } = setup(T_LVL));
+    if (e.collusionPress('p2')) return 'a computer pressed';
+    e.collusionPress('p0'); runEngine(e, fms(C.windowFrames) + 30); e.collusionPress('p1');
+    if (e.collusion) return 'presses more than 10 jiffies apart colluded';
+    runEngine(e, fms(C.cooldownFrames)); e.setPrice('p3', 45);
+    e.collusionPress('p0'); runEngine(e, 50); e.collusionPress('p1');
+    if (!e.collusion || e.collusion.stage !== 'flash' || e.collusion.members.join() !== 'p0,p1') return `no collusion: ${JSON.stringify(e.collusion)}`;
+    const main = e.units; const p2Price = e.entry('p2').price; const stock = state.store.stock.food;
+    runEngine(e, fms(C.flashFrames) - 30);
+    if (e.collusion.stage !== 'flash' || e.units !== main) return 'the main timer ran during the flash';
+    runEngine(e, 60);
+    if (e.collusion.stage !== 'active') return `stage ${e.collusion.stage}`;
+    e.setPrice('p2', 20); if (e.entry('p2').price !== p2Price) return 'a frozen colonist moved its marker';
+    e.setPrice('p0', 55); runEngine(e, 4000);
+    if (!e.volume || e.trades.some((x) => x.buyer !== 'p0' || x.seller !== 'p1')) return `trades ${JSON.stringify(e.trades)}`;
+    if (state.store.stock.food !== stock || state.players[2].inventory.food !== 10) return 'the store or a frozen colonist traded';
+    if (e.units !== main) return 'the main timer ran during the collusion';
+    e.setPrice('p0', 15); e.setPrice('p1', 200);
+    for (let k = 0; k < 20000 && e.collusion; k++) e.update(10);
+    return e.collusion === null && e.units === main ? audited(state) : `not over: ${JSON.stringify(e.collusion)}, units ${e.units}/${main}`;
+  });
+  t('Collusion: [Atari code] separate 50-unit timer; "La col·lusió s\'ha acabat", main timer restored, repeatable; survives a snapshot', () => {
+    const C = CONFIG.AUCTION.collusion;
+    const { state, rng } = fresh('col2', T_LVL); state.players[1].isHuman = true; setInv(state, 'p1', 'food', 10);
+    const e = engineFor(state, rng, 'food', ['p0', 'p1'], true, false);
+    e.setRole('p0', ROLE.BUYER); e.setRole('p1', ROLE.SELLER); runEngine(e, 20);
+    const go2 = () => { e.collusionPress('p0'); e.collusionPress('p1'); };
+    go2(); const main = e.units;
+    runEngine(e, fms(C.flashFrames) + 10);
+    if (e.collusion.stage !== 'active' || e.collusion.unitsTotal !== C.units || !(e.collusion.units > C.units - 1 && e.collusion.units < C.units)) return JSON.stringify(e.collusion);
+    const snap = AuctionEngine.restore(e.snapshot(), { market: e.market, state, rng });
+    if (JSON.stringify(snap.collusion) !== JSON.stringify(e.collusion)) return 'snapshot lost the collusion';
+    let ms = 0; while (e.collusion && e.collusion.stage === 'active' && ms < 60000) { e.update(10); ms += 10; }
+    const want = 50 * e.timing.idle;
+    if (Math.abs(ms - want) > 40) return `collusion lasted ${ms} ms, expected ~${Math.round(want)}`;
+    if (!e.collusion || e.collusion.stage !== 'over' || AUCTION_NOTICES.collusion_over !== 'La col·lusió s\'ha acabat') return `end ${JSON.stringify(e.collusion)}`;
+    let over = 0; while (e.collusion && over < 5000) { e.update(10); over += 10; }
+    if (Math.abs(over - fms(C.overFrames)) > 20) return `"over" shown ${over} ms`;
+    if (e.collusion !== null || e.units !== main) return `restore: ${JSON.stringify(e.collusion)} units ${e.units}/${main}`;
+    runEngine(e, fms(C.cooldownFrames)); go2();
+    return e.collusion && e.collusion.stage === 'flash' ? audited(state) : 'not repeatable';
+  });
+  t('Save: schema 8 keeps the Tournament state (deposits, known crystite, assays) exactly', () => {
+    const { state, rng } = fresh('tsave', T_LVL); CrystiteSystem.learn(state, 3, 2); state.crystite.assays.push({ pid: 'p0', plotId: 3, level: 2, turn: 1 });
+    const back = SaveSystem.deserialize(SaveSystem.serialize(state, rng));
+    return !back.incompatible && JSON.stringify(back.state) === JSON.stringify(state) ? true : 'round trip';
+  });
+  t('Game: a full 12-turn Tournament autopilot game ends; the same seed gives the same game; crystite mined and traded; ledger, RUCs consistent', () => {
+    const play = (seed) => { const g = mkGame(); g.autopilot = true; g.newGame({ seed, level: T_LVL }); for (let n = 0; n < 400000 && g.state.phase !== 'GAME_OVER'; n++) g.tick(50); return g; };
+    const a = play('tour-1'); const b = play('tour-1');
+    if (a.state.phase !== 'GAME_OVER') return `stuck in ${a.state.phase}, turn ${a.state.turn}`;
+    const key = (g) => JSON.stringify({ f: g.state.final, h: g.state.history, p: g.state.plots, r: g.rng.getState(), l: g.state.auctionLog, c: g.state.crystite });
+    if (key(a) !== key(b)) return 'the same seed gave a different game';
+    if (a.state.history.length !== 12) return `history ${a.state.history.length}`;
+    const f = a.state.final; const log = a.state.auctionLog;
+    const trades = log.reduce((s, x) => s + x.volume, 0); const cry = log.filter((x) => x.res === 'crystite').reduce((s, x) => s + x.volume, 0);
+    const mules = a.state.plots.filter((q) => q.ruc && q.ruc.module === 'crystite').length;
+    console.log(`SELFTEST full game tournament tour-1: colony ${f.combined} cr (${f.survives ? 'success' : 'failure'}), ${trades} units traded (crystite ${cry}), crystite RUCs ${mules}, assays known ${a.state.crystite.known.filter((v) => v !== null).length}, RUCs made ${a.state.rucs.made}, lost ${a.state.rucs.lost}`);
+    if (!cry || !mules) return `no crystite economy: traded ${cry}, RUCs ${mules}`;
     return audited(a.state);
   });
 

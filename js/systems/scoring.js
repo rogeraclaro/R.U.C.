@@ -7,7 +7,7 @@ const ScoringSystem = {
    * [C64] open question: the first Status Summary shows GOODS 150 for 4 food + 2 energy, while P 30/25 gives 170 (see README).
    */
   breakdown(state, p) {
-    const goods = enabledResources().reduce((s, d) => s + (p.inventory[d.id] || 0) * this.price(state, d.id), 0);
+    const goods = enabledResources(state).reduce((s, d) => s + (p.inventory[d.id] || 0) * this.price(state, d.id), 0);
     const plots = state.plots.filter((q) => q.ownerId === p.id);
     const withRuc = plots.filter((q) => q.ruc);
     const land = plots.length * CONFIG.PLOT_VALUE;

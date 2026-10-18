@@ -24,18 +24,18 @@ const CONFIG = deepFreeze({
   STORE_START: { food: 8, energy: 8, smithore: 8 },
   // [Atari code] the corral holds at most 14; between rounds the store builds min(14 - corral, smithore / 2), 2 Smithore each.
   RUC_START: 14, RUC_MAX: 14, SMITHORE_PER_RUC: 2,
-  // [manual] Outfitting: Food $25, Energy $50, Smithore $75 (Crystite $100 is Phase B and not wired).
-  MODULE_COST: { food: 25, energy: 50, smithore: 75 },
+  // [manual] Outfitting: Food $25, Energy $50, Smithore $75, Crystite $100 (the crystite shop opens only in Tournament).
+  MODULE_COST: { food: 25, energy: 50, smithore: 75, crystite: 100 },
   // [manual] Every plot is worth $500 in the summary.
   PLOT_VALUE: 500,
   // [Atari code] score: each installed M.U.L.E. adds $35 on top of its outfit cost (plot 500 + outfit + 35).
   RUC_WORTH: 35,
   // [Atari code][C64] food required for the current round: 3 in rounds 1-4, 4 in 5-8, 5 in 9-12.
   FOOD_NEED: [{ from: 1, to: 4, n: 3 }, { from: 5, to: 8, n: 4 }, { from: 9, to: 12, n: 5 }],
-  // [card] After consumption, 50% of the food left and 25% of the energy left spoil; ore only spoils above 50 units.
+  // [card] After consumption, 50% of the food left and 25% of the energy left spoil; ore (smithore, crystite) only spoils above 50 units.
   // Rounding of odd amounts is [PROVISIONAL]: floor (the spoiled part is rounded down).
   SPOILAGE: { foodPct: 50, energyPct: 25, oreCap: 50 },
-  // [Atari code] per-plot output is clamped to 0..8. varAmp: Standard variation factor F = 0.5 (Beginner 0, Tournament 1).
+  // [Atari code] per-plot output is clamped to 0..8. varAmp: Standard variation factor F = 0.5 (Beginner 0, Tournament 1, see LEVELS).
   PRODUCTION: { min: 0, max: 8, varAmp: 0.5 },
   // [Atari code] store price P: floors food 30 / energy 25 / smithore 20 (smithore: 50 before its random step), ceiling 250.
   // smithoreStep: the random term is 7 x binomial (amplitude 2), i.e. -28..+28.
@@ -63,7 +63,14 @@ const CONFIG = deepFreeze({
     declareUnits: 31, tradeUnits: 72, frames: { declare: 7, idle: 8, push: 30, contact: 60 }, atuStandard: 30,
     lineFrames: 8, cadenceBtu: [12, 12, 10, 8, 6, 4, 2], btuFrames: 4,
     sellerStartSteps: 1, buyerStartSteps: 10, storeBuyCap: 255, playerPriceMax: 999,
-    allOutMs: 3000, noOpMs: 5000, pushMs: 100, aiHoldMs: 1500
+    allOutMs: 3000, noOpMs: 5000, pushMs: 100, aiHoldMs: 1500,
+    /*
+     * [Atari code] collusion (Tournament goods auctions, sub_9926): the buttons of >= 2 humans pressed within windowFrames (10 jiffies,
+     * incl. a Buyer and a Seller) start it; each press then has a cooldownFrames (100) cooldown; "COLLUSION" flashes 3 x (20 on + 20 off
+     * = flashFrames 120); the colluders trade alone for `units` (50) time-bar units on a separate timer (the main timer is saved);
+     * "COLLUSION IS OVER" then shows for overFrames (50) and the main timer resumes.
+     */
+    collusion: { windowFrames: 10, cooldownFrames: 100, flashFrames: 120, flashes: 3, units: 50, overFrames: 50 }
   },
   /*
    * Land auctions ([Atari code], Standard and Tournament only). firstStart: the first auction of the game starts at $160 ([C64] "BIDS
@@ -92,6 +99,9 @@ const CONFIG = deepFreeze({
   // [Atari code] computer turn: keeps installing while >= aiMinUnits are left; each install costs aiInstallUnits + aiDistUnits x
   // distance (plots from the town); then the pub if >= pubMinUnits are left.
   PUB: { pubMinUnits: 3, aiMinUnits: 35, aiInstallUnits: 25, aiDistUnits: 2, cap: 250, overflow: 255 },
+  // Crystite ([Atari code], Tournament only, see CrystiteSystem): 3 seeds of level 3 (HIGH); store price 50 + rand(0..99) each round.
+  // Computer assay: 10 + 2 x distance PTU each, not under 22 PTU left, none once 3 HIGH plots are known, 1/8 pick chance per candidate.
+  CRYSTITE: { seeds: 3, high: 3, priceBase: 50, priceRand: 100, aiUnits: 10, aiDistUnits: 2, aiMinUnits: 22, aiStopHigh: 3, aiPick: 8 },
   // Walking during development. [C64] measured: map 0.667 px/frame horizontally and 0.333 vertically (a plot is ~32 x 32 C64 px:
   // ~48 / ~96 frames to cross it), town 1.33 px/frame horizontally. Scaled by TILE / c64Plot (96 / 32 = 3) to our pixels.
   // townPxPerFrame.y: [PROVISIONAL] not measured; half the horizontal speed, the same ratio as on the map ([Atari code] town step
@@ -116,7 +126,10 @@ const CONFIG = deepFreeze({
    * $50, double store stocks with 25 M.U.L.E.s (smithore 0 and 25 M.U.L.E.s again every round), 8 food / 4 energy to start, no
    * land selling nor land auctions, and a M.U.L.E. never runs away on a wrong button press. auctionAtu: [Atari code] auction time unit
    * (Beginner 50 frames instead of 30, doubled in round 1: atuRound1x2). criticalBlocksAll: [Atari code] in Beginner every seller stops
-   * at the critical level (in Standard only computers do). Tournament needs crystite, assay and collusion (Phase B).
+   * at the critical level (in Standard only computers do).
+   * Tournament ([Atari code], docs/research/tournament.md): cursor 3 BTU (12 frames), ATU 25, computers start with $1200 (aiCash),
+   * variation amplitude 2 (F = 1, clamped to +-4: varMax), colony land auctions Normal(1, amplitude 2) = 0..5 per round
+   * (landAuctionAmp / landAuctionMax), crystite + assay office, collusion in goods auctions, and the smarter computer rules (smartAi).
    */
   LEVELS: {
     beginner: {
@@ -126,7 +139,10 @@ const CONFIG = deepFreeze({
       auctionAtu: 50, atuRound1x2: true, criticalBlocksAll: true
     },
     standard: { label: 'Estàndard', rounds: 12, cursorFrames: 16 },
-    tournament: { label: 'Torneig', rounds: 12, disabled: true, note: 'cal crystite, Fase B' }
+    tournament: {
+      label: 'Torneig', rounds: 12, cursorFrames: 12, auctionAtu: 25, aiCash: 1200, varAmp: 1, varMax: 4,
+      landAuctionAmp: 1, landAuctionMax: 5, crystite: true, collusion: true, smartAi: true
+    }
   },
   /*
    * The computer players' reactions (one level: the original has no AI strength setting). These are the former middle "Colònia"
@@ -134,6 +150,19 @@ const CONFIG = deepFreeze({
    * reserve of at least 3. Not from the original code ([Atari code] documents only the grant and install rules, see AISystem).
    */
   AI: { reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3 },
+  /*
+   * [Atari code] Tournament-only computer rules (tournament.md §4.1, the only level-dependent AI branches):
+   *   buyOut (auctionBuySellAi8 $AF00): Food / Energy auction with only Buyers, not the last round, store stock <= 20: a computer whose
+   *     need is smaller than the store stock orders the whole stock if price x stock < its cash.
+   *   holdBack ($AA62-$AA9A): a Seller with a Food surplus < 6 or Energy surplus < 9, start price <= 80 and enough cash sells only
+   *     rand(0..surplus). holdBack.cash ("enough cash") is [PROVISIONAL].
+   *   crystite ($AAA4-$AB59, $AB75; read with medium confidence): holding some with P < 100 it sells only the excess over 50 or what
+   *     it needs to reach $1000; holding none it buys only when P < 86 and its cash >= 1100: (cash - 800) / P units, at most 25.
+   */
+  AI_TOURNAMENT: {
+    buyOut: { maxStock: 20 }, holdBack: { food: 6, energy: 9, maxPrice: 80, cash: 300 },
+    crystite: { sellBelow: 100, keep: 50, cashGoal: 1000, buyBelow: 86, buyCash: 1100, cashKeep: 800, maxBuy: 25 }
+  },
   /*
    * [Atari code][C64] species: Flapper $1600 and +2 BTU per unit (x9/7 time), Humanoid $600 and -2 BTU (x5/7), the others $1000.
    * Computers are always Mechtrons. Descriptions are our own short Catalan blurbs (only money and time differ in the rules).
@@ -162,7 +191,8 @@ const CONFIG = deepFreeze({
   // Schema 4: the 22 original personal events (used flags) and the planetary event bag (state.events).
   // Schema 5: game level (state.level replaces difficulty), species, land sales, original land/walk pacing.
   // Schema 6: original auction timing, continuous trading and critical levels; land auctions (state.landAuction, LAND_AUCTION phase).
-  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 7, MAX_DT_MS: 50
+  // Schema 7: the Mountain Wampus in the walk. Schema 8: Tournament (state.crystite: deposits, computers' known map, assays).
+  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 8, MAX_DT_MS: 50
 });
 
 /** The rules of the state's level: CONFIG.LEVELS entry over the Standard defaults. */
@@ -175,7 +205,9 @@ function levelRules(state) {
     startInv: L.startInv || CONFIG.START_INV, storeStart: L.storeStart || CONFIG.STORE_START, rucStart: L.rucStart || CONFIG.RUC_START,
     rucMax: L.rucMax || CONFIG.RUC_MAX, rucReset: !!L.rucReset, missFlees: L.missFlees !== false, landSales: L.landSales !== false,
     landAuctions: L.landAuctions !== false, auctionAtu: L.auctionAtu || CONFIG.AUCTION.atuStandard, atuRound1x2: !!L.atuRound1x2,
-    criticalBlocksAll: !!L.criticalBlocksAll
+    criticalBlocksAll: !!L.criticalBlocksAll, aiCash: L.aiCash || null, varMax: L.varMax || null,
+    landAuctionAmp: L.landAuctionAmp || CONFIG.PRODUCTION.varAmp, landAuctionMax: L.landAuctionMax || CONFIG.LAND_AUCTION.maxLots,
+    crystite: !!L.crystite && FEATURES.crystite, collusion: !!L.collusion, smartAi: !!L.smartAi
   };
 }
 /** The last round of the game (the ship comes back): 12 in Standard, 6 in Beginner. */
@@ -197,37 +229,36 @@ const COLONY_RATINGS = Object.freeze([
   'En conjunt, la colònia ha encantat la Federació amb el vostre èxit excepcional. La vostra jubilació serà luxosa!'
 ]);
 
-/* Mutable on purpose: Phase B modules are wired behind these flags. */
-const FEATURES = { crystite: false, landAuctions: true };
+/* Master switches (mutable on purpose). Crystite also needs a level that plays it (levelRules: Tournament only). */
+const FEATURES = { crystite: true, landAuctions: true };
 
-const RESOURCE = Object.freeze({
-  FOOD: 'food', ENERGY: 'energy', SMITHORE: 'smithore',
-  CRYSTITE: 'crystite' // Phase B, disabled
-});
+const RESOURCE = Object.freeze({ FOOD: 'food', ENERGY: 'energy', SMITHORE: 'smithore', CRYSTITE: 'crystite' });
 const TERRAIN = Object.freeze({ RIVER: 'river', PLAIN: 'plain', MOUNTAIN: 'mountain', TOWN: 'town' });
 const ROLE = Object.freeze({ BUYER: 'BUYER', SELLER: 'SELLER', OUT: 'OUT' });
 
 // basePrice: [Atari code][C64] starting store price P (food 30, energy 25, smithore 50). priceFloor: [Atari code] lowest P.
 // storeBuyOff / storeSellOff: [Atari code][C64] the store buys at P - buyOff and sells at P + sellOff (food & energy -15/+20,
 // smithore 0/+35). minPrice / maxPrice: the auction's price window = floor - buyOff .. ceiling 250 + sellOff (marker bounds).
-// auctionStep: [Atari code] $1 per marker step for food, energy and smithore.
-// Crystite is Phase B and deliberately left as it was.
+// auctionStep: [Atari code] $1 per marker step for food, energy and smithore, $4 for crystite.
+// Crystite ([Atari code], Tournament only): start P 100, re-drawn 50 + rand(0..99) every round; the store buys at P rounded down to a
+// multiple of buyRound (4) and sells at that + 140 (storeSellOff over the buy line, see StoreSystem.ask). minPrice / maxPrice are the
+// marker window: the lowest buy line (48) minus the buyers' 10 start steps, and the highest sell line (148 + 140 = 288) plus margin.
 const RESOURCE_DEFS = deepFreeze({
   food: { id: 'food', label: 'Menjar', icon: 'resource_food', module: 'module_food', enabled: true, basePrice: 30, priceFloor: 30, storeBuyOff: 15, storeSellOff: 20, minPrice: 15, maxPrice: 270, auctionStep: 1, color: '#7bd66f' },
   energy: { id: 'energy', label: 'Energia', icon: 'resource_energy', module: 'module_energy', enabled: true, basePrice: 25, priceFloor: 25, storeBuyOff: 15, storeSellOff: 20, minPrice: 10, maxPrice: 270, auctionStep: 1, color: '#4fd1e6' },
   smithore: { id: 'smithore', label: 'Smithore', icon: 'resource_smithore', module: 'module_smithore', enabled: true, basePrice: 50, priceFloor: 20, storeBuyOff: 0, storeSellOff: 35, minPrice: 20, maxPrice: 285, auctionStep: 1, color: '#ff9a3c' },
-  crystite: { id: 'crystite', label: 'Crystite', icon: 'resource_smithore', module: 'module_smithore', enabled: false, basePrice: 90, minPrice: 30, maxPrice: 300, auctionStep: 3, color: '#d77bff' }
+  crystite: { id: 'crystite', label: 'Crystite', icon: 'resource_crystite', module: 'module_crystite', enabled: true, basePrice: 100, priceFloor: 50, buyRound: 4, storeBuyOff: 0, storeSellOff: 140, minPrice: 8, maxPrice: 300, auctionStep: 4, color: '#d77bff' }
 });
 
-/** Resources that take part in production, consumption and auctions. Registry-driven so Phase B needs no engine rewrite. */
-function enabledResources(defs = RESOURCE_DEFS) {
-  return Object.values(defs).filter((d) => d.enabled && (d.id !== 'crystite' || FEATURES.crystite));
+/** Resources that take part in production, consumption, auctions and the score in this game (crystite: Tournament only). */
+function enabledResources(state = null, defs = RESOURCE_DEFS) {
+  return Object.values(defs).filter((d) => d.enabled && (d.id !== 'crystite' || levelRules(state).crystite));
 }
 
 /** [manual] Auction order: Smithore -> Crystite (Tournament only) -> Food -> Energy. Disabled goods are skipped. */
 const AUCTION_ORDER = Object.freeze(['smithore', 'crystite', 'food', 'energy']);
-function auctionResources(defs = RESOURCE_DEFS) {
-  const on = enabledResources(defs);
+function auctionResources(state = null, defs = RESOURCE_DEFS) {
+  const on = enabledResources(state, defs);
   return AUCTION_ORDER.map((id) => on.find((d) => d.id === id)).filter(Boolean).concat(on.filter((d) => !AUCTION_ORDER.includes(d.id)));
 }
 
@@ -250,12 +281,12 @@ const PRODUCTION_TABLE = deepFreeze({
 const EVENT_DEFS = deepFreeze({
   // Planetary events, in the original id order (roundEventsProbInit).
   pest_attack: { id: 'pest_attack', scope: 'planet', negative: true, tickets: 3, timing: 'after', name: 'Atac de plaga', art: 0, origin: 'c64', text: (p) => `La plaga ataca la parcel·la #${p.plot} de ${p.who}: s'hi perd tot el menjar (${p.amount}).` },
-  pirates: { id: 'pirates', scope: 'planet', negative: true, tickets: 2, timing: 'after', name: 'Nau pirata', art: 4, origin: 'c64', text: (p) => `Els pirates s'enduen tot el smithore! (${p.amount} unitats)` },
+  pirates: { id: 'pirates', scope: 'planet', negative: true, tickets: 2, timing: 'after', name: 'Nau pirata', art: 4, origin: 'c64', text: (p) => `Els pirates s'enduen tot el ${p.res === 'crystite' ? 'crystite' : 'smithore'}! (${p.amount} unitats)` },
   acid_rain: { id: 'acid_rain', scope: 'planet', negative: false, tickets: 3, timing: 'before', name: 'Tempesta de pluja àcida', art: 5, origin: 'c64', text: () => 'Més producció de menjar, menys energia.' },
   planetquake: { id: 'planetquake', scope: 'planet', negative: true, tickets: 3, timing: 'before', name: 'Terratrèmol planetari', art: 3, origin: 'c64', text: (p) => `La producció minera és la meitat de la normal.${p.slide ? ` Una muntanya llisca de la parcel·la #${p.slide.from + 1} a la #${p.slide.to + 1}.` : ''}` },
   sunspot: { id: 'sunspot', scope: 'planet', negative: false, tickets: 3, timing: 'before', name: 'Activitat de taques solars', art: 1, origin: 'c64', text: () => 'La producció d\'energia augmenta.' },
   // [Atari code] the "new crystite deposit" subtext is printed only in Tournament; Standard shows just where it fell.
-  meteorite: { id: 'meteorite', scope: 'planet', negative: true, tickets: 2, timing: 'before', name: 'Impacte de meteorit', art: 2, origin: 'c64', text: (p) => `Cau a la parcel·la #${p.plot}${p.mule ? ' i destrueix el RUC que hi havia' : ''}.` },
+  meteorite: { id: 'meteorite', scope: 'planet', negative: true, tickets: 2, timing: 'before', name: 'Impacte de meteorit', art: 2, origin: 'c64', text: (p) => `Cau a la parcel·la #${p.plot}${p.mule ? ' i destrueix el RUC que hi havia' : ''}.${p.crystite ? ' El meteorit crea un nou jaciment de crystite.' : ''}` },
   radiation: { id: 'radiation', scope: 'planet', negative: true, tickets: 2, timing: 'before', name: 'Radiació', art: 3, origin: 'c64', text: (p) => `Un RUC es torna boig! (parcel·la #${p.plot} de ${p.who})` },
   store_fire: { id: 'store_fire', scope: 'planet', negative: true, tickets: 2, timing: 'after', name: 'Incendi a la botiga', art: 7, origin: 'c64', text: () => 'Tot l\'estoc de la botiga es perd!' },
   // Personal events, index = original id 00..21.

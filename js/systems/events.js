@@ -150,18 +150,20 @@ const EventSystem = {
         Object.assign(params, { plot: plot.id + 1, amount: n });
       }
       if (id === 'pirates') {
-        // [Atari code] Standard: every player's smithore AND the store's, and this round's smithore production (Tournament: crystite, Phase B).
-        params.amount = 0;
+        // [Atari code] $7710: Standard / Beginner take every player's smithore AND the store's, and this round's smithore production;
+        // Tournament takes every player's crystite and this round's crystite production (the store's smithore is not touched).
+        const res = levelRules(state).crystite ? 'crystite' : 'smithore';
+        params.amount = 0; params.res = res;
         state.players.forEach((p) => {
-          const k = p.inventory.smithore || 0;
+          const k = p.inventory[res] || 0;
           const st = state.settlement && state.settlement.turn === state.turn ? state.settlement.rows.find((r) => r.playerId === p.id) : null;
-          if (st && st.produced.smithore !== undefined) {
-            st.lost.smithore += k - st.produced.smithore; st.produced.smithore = 0; st.final.smithore = 0;
-            st.items.forEach((it) => { if (it.module === 'smithore' && it.amount > 0) { it.amount = 0; it.zeroed = 'pirates'; } });
+          if (st && st.produced[res] !== undefined) {
+            st.lost[res] += k - st.produced[res]; st.produced[res] = 0; st.final[res] = 0;
+            st.items.forEach((it) => { if (it.module === res && it.amount > 0) { it.amount = 0; it.zeroed = 'pirates'; } });
           }
-          if (k > 0) { ResourceLedger.moveItem(state, 'smithore', p.id, 'nature', k); params.amount += k; }
+          if (k > 0) { ResourceLedger.moveItem(state, res, p.id, 'nature', k); params.amount += k; }
         });
-        const s = state.store.stock.smithore || 0;
+        const s = res === 'smithore' ? state.store.stock.smithore || 0 : 0;
         if (s > 0) { ResourceLedger.moveItem(state, 'smithore', 'store', 'nature', s); params.amount += s; }
       }
       if (id === 'store_fire') {
@@ -171,11 +173,12 @@ const EventSystem = {
       if (id === 'sunspot') m.sunspot = true;
       if (id === 'planetquake') { m.quake = true; params.slide = rng.int(2) ? this.slide(state, rng) : null; }
       if (id === 'meteorite') {
-        // [Atari code] a plot that is not town or river with crystite < 3 gets a level-4 deposit (kept for Phase B) and loses its MULE.
+        // [Atari code] $7CA7: a plot that is not town or river with crystite < 3 gets a level-4 deposit (no spread) and loses its MULE;
+        // the computers know it at once. The "new crystite deposit" subtext is printed only in Tournament ($7DB3).
         const plot = rng.pick(state.plots.filter((q) => q.terrain !== TERRAIN.TOWN && q.terrain !== TERRAIN.RIVER && (q.hiddenDeposit || 0) < 3));
         if (!plot) return null;
-        plot.hiddenDeposit = 4;
-        Object.assign(params, { plot: plot.id + 1, mule: this.destroyRuc(state, plot) });
+        plot.hiddenDeposit = 4; CrystiteSystem.learn(state, plot.id, 4);
+        Object.assign(params, { plot: plot.id + 1, mule: this.destroyRuc(state, plot), crystite: levelRules(state).crystite });
       }
       if (id === 'radiation') {
         const plot = this.scanPlots(state, rng, (q) => !!q.ruc && top2.includes(q.ownerId));

@@ -18,7 +18,7 @@ const SettlementSystem = {
   run(state, rng) {
     if (state.settlement && state.settlement.turn === state.turn) return state.settlement;
     const need = ConsumptionSystem.foodNeed(state.turn);
-    const resIds = enabledResources().map((d) => d.id);
+    const resIds = enabledResources(state).map((d) => d.id);
     const harvest = [];
     const rows = state.players.map((p) => {
       const blank = () => { const o = {}; resIds.forEach((r) => { o[r] = 0; }); return o; };

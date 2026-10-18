@@ -35,7 +35,7 @@ class SetupScreen {
     Object.entries(CONFIG.LEVELS).forEach(([id, L], i) => {
       const x = 180 + i * 306;
       r.button(`s-lvl-${id}`, L.label, x, 526, 290, 48, { checked: st.level === id, disabled: !!L.disabled, onClick: () => { st.level = id; } });
-      const note = L.disabled ? L.note : id === 'beginner' ? '6 mesos · regles simplificades' : '12 mesos · regles completes';
+      const note = L.disabled ? L.note : id === 'beginner' ? '6 mesos · regles simplificades' : id === 'tournament' ? '12 mesos · crystite i col·lusió' : '12 mesos · regles completes';
       r.text(note, x, 580, { size: 16, color: COL.dim, maxW: 290 });
     });
     r.text('Rivals: Bran, Vela i Nox (Mechtrons). Mateixa llavor i mateixes accions, mateix resultat.', 180, 612, { size: 16, color: COL.dim, maxW: 920 });

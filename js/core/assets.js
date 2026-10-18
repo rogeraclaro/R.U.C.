@@ -1,4 +1,30 @@
 'use strict';
+/**
+ * Art drawn in code for names that have no PNG (crystite: no asset exists). Our own drawings, in the style of the resource icons:
+ * a faceted violet crystal; the module is the crystal on a dark plate with the crystite colour as its frame.
+ */
+const PROCEDURAL_ART = {
+  resource_crystite(ctx, x, y, w, h) {
+    const cx = x + w / 2; const s = Math.min(w, h) / 2; const top = y + h / 2 - s * 0.95; const bot = y + h / 2 + s * 0.95;
+    const L = cx - s * 0.62; const R = cx + s * 0.62; const mid = y + h / 2 - s * 0.25;
+    ctx.save();
+    const facets = [
+      ['#f3d2ff', [[cx, top], [L, mid], [cx - s * 0.12, mid]]], ['#c77dff', [[cx, top], [cx - s * 0.12, mid], [R, mid]]],
+      ['#9b4fe0', [[L, mid], [cx, bot], [cx - s * 0.12, mid]]], ['#6a2bb0', [[cx - s * 0.12, mid], [cx, bot], [R, mid]]]
+    ];
+    facets.forEach(([fill, pts]) => { ctx.fillStyle = fill; ctx.beginPath(); pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py))); ctx.closePath(); ctx.fill(); });
+    ctx.strokeStyle = '#2a0d4a'; ctx.lineWidth = Math.max(1, s / 10); ctx.beginPath();
+    ctx.moveTo(cx, top); ctx.lineTo(R, mid); ctx.lineTo(cx, bot); ctx.lineTo(L, mid); ctx.closePath(); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(cx - s * 0.3, mid - s * 0.32, Math.max(1, s / 7), Math.max(1, s / 7));
+    ctx.restore();
+  },
+  module_crystite(ctx, x, y, w, h) {
+    ctx.save(); ctx.fillStyle = '#3a1f5c'; ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x + 2, y + 2, w - 4, Math.max(2, h / 6));
+    ctx.restore();
+    PROCEDURAL_ART.resource_crystite(ctx, x + w * 0.12, y + h * 0.12, w * 0.76, h * 0.76);
+  }
+};
 class AssetLoader {
   constructor(list = ASSET_LIST) {
     this.list = list;
@@ -22,6 +48,8 @@ class AssetLoader {
   }
   def(name) { return this.list.find((a) => a.name === name); }
   has(name) { return this.images.has(name); }
+  /** A PNG wins; otherwise names in PROCEDURAL_ART are drawn in code instead of the placeholder. */
+  procedural(name) { return !this.images.has(name) && PROCEDURAL_ART[name] ? PROCEDURAL_ART[name] : null; }
   /** Frame size is derived from the real image: never hardcode the spec sizes. */
   frameSize(name) {
     const img = this.images.get(name);
@@ -60,6 +88,7 @@ class AssetLoader {
   }
   /** Draws an asset stretched to the box; falls back to a Canvas placeholder if the PNG is missing. */
   draw(ctx, name, x, y, w, h, frame = 0) {
+    const art = this.procedural(name); if (art) { art(ctx, x, y, w, h); return true; }
     const c = this.scaled(name, w, h, frame);
     if (c) { ctx.drawImage(c, Math.round(x), Math.round(y)); return true; }
     this.fallback(ctx, name, x, y, w, h);
@@ -67,6 +96,7 @@ class AssetLoader {
   }
   /** Same as draw but keeps the art aspect ratio inside the box, centred. */
   drawContain(ctx, name, x, y, w, h, frame = 0) {
+    const art = this.procedural(name); if (art) { const k = Math.min(w, h); art(ctx, x + (w - k) / 2, y + (h - k) / 2, k, k); return true; }
     if (!this.has(name)) { this.fallback(ctx, name, x, y, w, h); return false; }
     const fs = this.frameSize(name);
     const k = Math.min(w / fs.w, h / fs.h);

@@ -85,7 +85,7 @@ class Game {
     const seed = (opts.seed && String(opts.seed).trim()) || this.randomSeed();
     const { state, rng } = GameState.create({ seed, level: opts.level, species: opts.species, playerName: (opts.playerName || 'Roger').trim() || 'Roger', colorId: opts.colorId });
     this.state = state; this.rng = rng; this.rt = {}; this.paused = false; this.helpOpen = false; this.mode = 'play';
-    state.createdAt = Date.now();
+    state.createdAt = Date.now(); this.defineTurnPhases(state);
     this.turns.enter(this, 'TURN_START');
   }
   continueGame() {
@@ -102,7 +102,7 @@ class Game {
   /** Re-enters the saved phase; resumable phases continue from their saved phaseData instead of starting again. */
   resume(r) {
     this.state = r.state; this.rng = new SeededRNG(r.state.seed); this.rng.setState(r.state.rngState);
-    this.rt = {}; this.paused = false; this.mode = 'play';
+    this.rt = {}; this.paused = false; this.mode = 'play'; this.defineTurnPhases(this.state);
     if (this.state.phase === 'GAME_OVER') { this.turns.phase = null; this.setScreen('gameover'); return; }
     const def = this.turns.get(this.state.phase);
     const resume = !!(def && def.resumable && this.state.phaseData && Object.keys(this.state.phaseData).length);
@@ -213,6 +213,7 @@ class Game {
       const slot = this.devSlot(); if (!slot) return '';
       const w = this.humanWalk();
       if (w) {
+        if (w.assay && !w.carrying) return w.assay.plotId === null ? 'Prem Acció sobre qualsevol parcel·la per agafar una mostra del sòl.' : `Mostra de la parcel·la #${w.assay.plotId + 1}: torna a l'oficina d'assaig.`;
         if (w.marking && !w.carrying) return w.markPlot === null ? 'Marca una parcel·la teva amb Acció i torna a l\'oficina de terres.' : `Parcel·la #${w.markPlot + 1} marcada: torna a l'oficina de terres per vendre-la.`;
         if (!w.carrying) return w.area === 'town' ? 'Compra un RUC al corral, o ves al pub a acabar el torn.' : 'Torna al poble per un RUC, o retira\'n un d\'una parcel·la teva.';
         if (!w.carrying.module) return w.area === 'town' ? 'Entra a un taller per equipar el RUC.' : 'Torna al poble: el RUC s\'ha d\'equipar a un taller.';
@@ -288,6 +289,7 @@ class Game {
       const turn = AISystem.turn(s, this.rng, p);
       turn.installs.forEach((a) => slot.log.push(`${p.name}: RUC de ${resLabel(a.module).toLowerCase()} a la parcel·la ${a.plotId + 1}`));
       if (!turn.installs.length) slot.log.push(`${p.name} no instal·la cap RUC aquest torn.`);
+      if (turn.assays.length) slot.log.push(`${p.name} fa ${turn.assays.length === 1 ? 'un assaig' : `${turn.assays.length} assaigs`} de crystite.`);
       if (turn.pub) slot.log.push(`${p.name} va al pub i guanya ${turn.pub} cr jugant.`);
       slot.timer = this.fast(ev ? 2600 : 1400);
       this.announce(slot.log.join(' '));
@@ -345,6 +347,14 @@ class Game {
     a.engine.setRole('p0', role);
   }
   /** [Atari code] a human marker moves one step per 8 frames (the line speed of every colonist); Shift x3 is a R.U.C. convenience. */
+  /**
+   * A human's stick button in a goods auction ([Atari code] collusion trigger, Tournament only; AuctionEngine.collusionPress). With one
+   * human it can never start a collusion (it needs two); Batch 9 maps every human's button here.
+   */
+  auctionButton(pid = 'p0') {
+    const a = this.rt.auction; if (!a || this.paused || this.helpOpen) return false;
+    return a.engine.collusionPress(pid);
+  }
   humanStepsPerSec() { return (1000 / AuctionEngine.lineMs()) * (this.input.keys.has('Shift') ? 3 : 1); }
   auctionToggleOut() {
     const a = this.rt.auction; if (!a) return;
@@ -406,7 +416,7 @@ class Game {
   drawDebugBar(r) {
     const s = this.state; const y = 696;
     r.panel(0, y, CONFIG.W, 24, { fill: 'rgba(60,20,40,0.94)', frame: false });
-    const stock = enabledResources().map((d) => `${d.id[0].toUpperCase()}${s.store.stock[d.id]}`).join(' ');
+    const stock = enabledResources(s).map((d) => `${d.id[0].toUpperCase()}${s.store.stock[d.id]}`).join(' ');
     r.text(`${this.turns.phase} · llavor ${s.seed} · ${this.fps} FPS · botiga ${stock} · RUC ${s.store.ruc} · ${this.debugAI()} ${this.debugLog}`, 8, y + 3, { size: 16, maxW: 780, shadow: false });
     r.button('dbg-next', 'Següent fase', 800, y, 150, 24, { size: 16, onClick: () => this.debugNextPhase() });
     r.button('dbg-cash', '+1000 cr', 958, y, 110, 24, { size: 16, onClick: () => this.debugCash() });
@@ -418,7 +428,8 @@ class Game {
   }
 
   /* ---- turn phases ([manual] cycle: land grant, development, planetary event, production, status, auctions, summary) ---- */
-  defineTurnPhases() {
+  /** The phase list of a game: the goods auctions follow the level's resources (Tournament adds crystite after smithore). */
+  defineTurnPhases(state = null) {
     const timed = (g, dt, ts) => { ts.phaseData.timer -= dt; if (ts.phaseData.timer <= 0) ts.canAdvance = true; };
     const defs = [
       {
@@ -530,7 +541,7 @@ class Game {
         update: (g, dt, ts) => { if (g.autopilot) timed(g, dt, ts); }
       }
     ];
-    auctionResources().forEach((d) => defs.push(this.auctionPhase(d)));
+    auctionResources(state).forEach((d) => defs.push(this.auctionPhase(d)));
     defs.push(
       {
         id: 'TURN_REPORT', label: 'Informe del torn', save: true,
@@ -558,6 +569,8 @@ class Game {
       enter: (g, ts) => {
         const s = g.state; const market = AuctionEngine.fungibleMarket(def); const onTrade = () => g.audio.play('auction_trade_unit');
         const saved = ts.phaseData.auction;
+        // [Atari code] goodAuction: no crystite auction when nobody holds (or produced) crystite and the store has none.
+        if (!saved && def.id === 'crystite' && !CrystiteSystem.auctionNeeded(s)) { g.rt.auction = null; ts.canAdvance = true; return; }
         if (saved) {
           // Resumed from a save taken mid-auction (declaration or trade stage): exact engine, AI brains and roles.
           g.rt.auction = { engine: AuctionEngine.restore(saved.engine, { market, state: s, rng: g.rng, onTrade }), brains: JSON.parse(JSON.stringify(saved.brains)), res: def.id, endHold: saved.endHold, lastRole: saved.lastRole, viewHi: saved.viewHi };
@@ -572,17 +585,22 @@ class Game {
         g.setScreen('auction'); g.announce(`Subhasta de ${def.label}: declareu-vos compradors o venedors`);
       },
       snapshot: (g, ts) => {
-        const a = g.rt.auction;
+        const a = g.rt.auction; if (!a) return;
         if (a) ts.phaseData.auction = { engine: a.engine.snapshot(), brains: JSON.parse(JSON.stringify(a.brains)), endHold: a.endHold, lastRole: a.lastRole, viewHi: a.viewHi || 0 };
       },
       update: (g, dt, ts) => {
-        const a = g.rt.auction; const e = a.engine; const s = g.state;
+        const a = g.rt.auction; if (!a) return;
+        const e = a.engine; const s = g.state;
+        const col = e.collusion ? e.collusion.stage : null;
         if (!e.ended) {
           s.players.forEach((p) => { const b = a.brains[p.id]; if (b) AISystem.tick(s, g.rng, p, b, e, dt); });
           if (!g.autopilot) g.updateAuctionInput(dt);
           const stage = e.stage; const unitsBefore = e.units;
           e.update(dt);
           if (e.stage === 'trade' && stage === 'trade') g.auctionTick(unitsBefore, e.units);
+          const now = e.collusion ? e.collusion.stage : null;
+          if (now !== col && now === 'flash') { g.audio.play('declare'); g.announce(AUCTION_NOTICES.collusion); }
+          if (now !== col && now === 'over') g.announce(AUCTION_NOTICES.collusion_over);
           if (e.ended) g.audio.play('auction_over');
         } else {
           a.endHold += dt; ts.phaseData.skippable = true;
@@ -590,9 +608,11 @@ class Game {
         }
       },
       exit: (g) => {
+        if (!g.rt.auction) return; // skipped (crystite with none anywhere)
         const s = g.state; const e = g.rt.auction.engine; const res = e.result;
         s.auctionLog.push({ turn: s.turn, res: res.res, volume: res.volume, min: res.min, avg: res.avg, max: res.max });
         StoreSystem.afterAuction(s, def.id, res);
+        if (def.id === 'crystite') CrystiteSystem.shipOff(s);
         g.rt.auction.engine.ended = true;
       }
     };

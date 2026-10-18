@@ -1,10 +1,11 @@
 'use strict';
 /**
  * Town interior, in logical px of the map rectangle. [C64] layout: a street across the town between two rows of four buildings —
- * top row crystite shop (closed: Tournament only, no door), smithore, energy and food shops; bottom row assay office (closed:
- * Tournament only), land office, pub and the corral. The central passage from top to bottom and the street ends are the exits
- * (our own walkable geometry; the C64 sizes are not copied). The strip under the bottom row shows "Els teus diners" as the C64.
- * `kind`: shop / corral (the RUC walks in, see startVisit), pub / land (the colonist goes in), closed (a wall).
+ * top row crystite shop, smithore, energy and food shops; bottom row assay office, land office, pub and the corral. The crystite
+ * shop and the assay office (`tournament`) open only in Tournament; elsewhere they are blank buildings with no door ([Atari code]
+ * $4644-$46BF, [C64]). The central passage from top to bottom and the street ends are the exits (our own walkable geometry; the C64
+ * sizes are not copied). The strip under the bottom row shows "Els teus diners" as the C64.
+ * `kind`: shop / corral (the RUC walks in, see startVisit), pub / land / assay (the colonist goes in), closed (a wall; see DevWalk.kind).
  */
 // `spot`: the interior counter a colonist must actually walk up to before a shop/corral visit does anything (see moveTown). It
 // sits well past the doorway, deep inside the room, so a step that only grazes the threshold while walking the street never
@@ -12,11 +13,11 @@
 const TOWN = deepFreeze({
   W: CONFIG.COLS * CONFIG.TILE, H: CONFIG.ROWS * CONFIG.TILE, streetTop: 150, streetBottom: 300, passX0: 384, passX1: 480, moneyY: 452,
   buildings: [
-    { id: 'shop_crystite', kind: 'closed', label: 'Crystite', x: 12, y: 10, w: 176, h: 140 },
+    { id: 'shop_crystite', kind: 'shop', res: 'crystite', tournament: true, label: 'Crystite', x: 12, y: 10, w: 176, h: 140, door: 'bottom', spot: { x: 100, y: 60 } },
     { id: 'shop_smithore', kind: 'shop', res: 'smithore', label: 'Smithore', x: 196, y: 10, w: 176, h: 140, door: 'bottom', spot: { x: 284, y: 60 } },
     { id: 'shop_energy', kind: 'shop', res: 'energy', label: 'Energia', x: 492, y: 10, w: 176, h: 140, door: 'bottom', spot: { x: 580, y: 60 } },
     { id: 'shop_food', kind: 'shop', res: 'food', label: 'Menjar', x: 676, y: 10, w: 176, h: 140, door: 'bottom', spot: { x: 764, y: 60 } },
-    { id: 'assay', kind: 'closed', label: 'Assaig', x: 12, y: 300, w: 176, h: 140 },
+    { id: 'assay', kind: 'assay', tournament: true, label: 'Assaig', x: 12, y: 300, w: 176, h: 140, door: 'top', spot: { x: 100, y: 390 } },
     { id: 'land_office', kind: 'land', label: 'Oficina de terres', x: 196, y: 300, w: 176, h: 140, door: 'top', spot: { x: 284, y: 390 } },
     { id: 'pub', kind: 'pub', label: 'Pub', x: 492, y: 300, w: 176, h: 140, door: 'top', spot: { x: 580, y: 390 } },
     { id: 'corral', kind: 'corral', label: 'Corral', x: 676, y: 300, w: 176, h: 140, door: 'top', spot: { x: 764, y: 390 } }
@@ -37,7 +38,7 @@ const DevWalk = {
     return {
       pid, area: 'town', x: (TOWN.passX0 + TOWN.passX1) / 2, y: (TOWN.streetTop + TOWN.streetBottom) / 2,
       carrying: null, latch: null, pressT: 0, visited: false, visiting: null, installing: null, fleeing: null, endWhy: null,
-      marking: false, markPlot: null, won: 0,
+      marking: false, markPlot: null, assay: null, won: 0,
       timeLeft: timeMs, timeTotal: timeMs, unitMs: ConsumptionSystem.unitMs(state, playerById(state, pid)),
       acc: 0, ended: null, msg: '', bad: false, log: [], seq: 0
     };
@@ -53,6 +54,8 @@ const DevWalk = {
     const px = plot.x * CONFIG.TILE; const py = plot.y * CONFIG.TILE;
     return w.x >= px && w.x < px + CONFIG.TILE && w.y >= py && w.y < py + CONFIG.TILE;
   },
+  /** A building's kind in this game: the Tournament-only buildings are closed walls in the other levels. */
+  kind(state, b) { return b && b.tournament && !levelRules(state).crystite ? 'closed' : b && b.kind; },
   inTownFloor(x, y) { return (y >= TOWN.streetTop && y <= TOWN.streetBottom) || (x >= TOWN.passX0 && x <= TOWN.passX1); },
   buildingAt(x, y) { return TOWN.buildings.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) || null; },
   /** { x, y } in px per ms: the [C64] px-per-frame speeds scaled to our TILE, river / mountain slower (see CONFIG.WALK). */
@@ -114,9 +117,9 @@ const DevWalk = {
       if (nx < 0) { w.x = t.x - 1; w.y = t.y + sy * (t.h - 1); } else if (nx > TOWN.W) { w.x = t.x + t.w; w.y = t.y + sy * (t.h - 1); } else if (ny < 0) { w.y = t.y - 1; w.x = t.x + sx * (t.w - 1); } else { w.y = t.y + t.h; w.x = t.x + sx * (t.w - 1); }
       return;
     }
-    const b = this.buildingAt(nx, ny);
+    const b = this.buildingAt(nx, ny); const kind = this.kind(state, b);
     // A closed building has no door: it is a wall (falls through to the sliding below).
-    if (b && b.kind !== 'closed') {
+    if (b && kind !== 'closed') {
       // The colonist never actually walks in: they stay right at this doorway (their position never adopts nx, ny) and only
       // the RUC itself goes on to the counter, once genuinely pushing into the door for CONFIG.WALK.doorHoldMs has committed
       // to a visit (see startVisit / MapScreen.drawVisiting) — a brief graze while walking the street falls short of that and
@@ -125,8 +128,8 @@ const DevWalk = {
       if (w.latch !== b.id) { w.latch = b.id; w.pressT = 0; w.visited = false; }
       if (w.visited) return;
       w.pressT += CONFIG.WALK.stepMs;
-      // Shops and the corral: only the RUC goes in (scripted visit). The pub and the land office: the colonist goes in at once.
-      if (w.pressT >= CONFIG.WALK.doorHoldMs) { w.visited = true; if (b.kind === 'pub' || b.kind === 'land') this.enter(state, w, b); else this.startVisit(state, w, b); }
+      // Shops and the corral: only the RUC goes in (scripted visit). The pub, the land and assay offices: the colonist goes in at once.
+      if (w.pressT >= CONFIG.WALK.doorHoldMs) { w.visited = true; if (kind === 'pub' || kind === 'land' || kind === 'assay') this.enter(state, w, b); else this.startVisit(state, w, b); }
       return;
     }
     if (w.latch) { w.latch = null; w.pressT = 0; w.visited = false; }
@@ -148,14 +151,15 @@ const DevWalk = {
   say(w, msg, bad = false, kind = null) { w.msg = msg; w.bad = bad; w.seq += 1; if (kind) w.log.push(kind); return kind; },
   enter(state, w, b) {
     w.latch = b.id;
-    // [C64] "NO MULES ALLOWED" is in the C64 strings; that it is the pub's and the land office's answer is [PROVISIONAL].
-    if ((b.kind === 'pub' || b.kind === 'land') && w.carrying) return this.say(w, 'No s\'hi admeten RUCs.', true, 'refused');
+    // [C64] "NO MULES ALLOWED" is in the C64 strings; that it is the pub's and the land / assay offices' answer is [PROVISIONAL].
+    if ((b.kind === 'pub' || b.kind === 'land' || b.kind === 'assay') && w.carrying) return this.say(w, 'No s\'hi admeten RUCs.', true, 'refused');
     if (b.kind === 'pub') {
       // [Atari code][C64] the pub ends the development turn and pays (PubSystem) with the units still left.
       w.won = PubSystem.visit(state, w.pid, this.unitsLeft(w)); w.ended = 'pub';
       return this.say(w, `Has guanyat ${w.won} cr jugant!`, false, 'pub');
     }
     if (b.kind === 'land') return this.landOffice(state, w);
+    if (b.kind === 'assay') return this.assayOffice(state, w);
     if (b.kind === 'corral') {
       if (w.carrying) {
         const back = StoreSystem.refundRuc(state, w.pid, w.carrying.paid); const mod = w.carrying.module;
@@ -186,6 +190,27 @@ const DevWalk = {
     const id = w.markPlot; LandOffice.mark(state, w.pid, id); w.marking = false; w.markPlot = null;
     return this.say(w, `Parcel·la #${id + 1} en venda: sortirà a la propera subhasta de terres.`, false, 'for_sale');
   },
+  /**
+   * [Atari code] assay office ($690A-$691D, $68FF, $69A7; Tournament only): the first visit asks "GET SOIL SAMPLE THEN COME BACK.";
+   * back without a sample: "NEED SOIL SAMPLE"; with one: "<NO / LOW / MEDIUM / HIGH> CRYSTITE FOUND IN PLOT." (CrystiteSystem.record).
+   * The development clock keeps running (only the land office stops it in the original). Nothing is marked on the map.
+   */
+  assayOffice(state, w) {
+    if (!w.assay) { w.assay = { plotId: null }; return this.say(w, 'Agafa una mostra del sòl i torna.', false, 'assay_request'); }
+    if (w.assay.plotId === null) return this.say(w, 'Cal una mostra.', true, 'assay_need');
+    const id = w.assay.plotId; w.assay = null;
+    const level = CrystiteSystem.record(state, w.pid, id);
+    return this.say(w, `${CrystiteSystem.LEVEL_NAMES[level]} crystite a la parcel·la #${id + 1}.`, false, 'assay_result');
+  },
+  /**
+   * [Atari code] $6B6F-$6BA3: with a sample requested, the button on ANY plot (owned or not: ownership is not checked) takes it,
+   * "SAMPLE READY TO RETURN TO OFFICE"; a second plot on the same trip: "1 PLOT PER TRIP".
+   */
+  takeSample(state, w, plot) {
+    if (w.assay.plotId !== null) return this.say(w, 'Una parcel·la per viatge.', true, 'one_plot');
+    w.assay.plotId = plot.id;
+    return this.say(w, 'Mostra a punt: torna a l\'oficina.', false, 'sample');
+  },
   /** The "joystick button" (Enter / Space / Acció). It only does something on the map; clicks on the map never call it. */
   act(state, w) {
     if (w.ended || w.installing || w.fleeing) return null; // busy: already installing or fleeing
@@ -194,6 +219,7 @@ const DevWalk = {
     const won = WampusSystem.tryCatch(state, w);
     if (won) return this.say(w, `Has caçat el Wampus de muntanya!! T'ha donat el seu cofre: ${won} cr perquè el deixis lliure.`, false, 'wampus');
     const plot = this.plotAt(state, w.x, w.y); const own = plot.ownerId === w.pid; const house = this.atHouse(w, plot);
+    if (!w.carrying && w.assay) return this.takeSample(state, w, plot);
     if (!w.carrying && w.marking) {
       if (!own) return this.say(w, 'No és la teva parcel·la.', true);
       w.markPlot = plot.id;

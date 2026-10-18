@@ -157,15 +157,15 @@ class MapScreen {
     r.text('▲ sortida', X + (TOWN.passX0 + TOWN.passX1) / 2, Y + 6, { size: 16, color: COL.dim, align: 'center' });
     r.text('▼ sortida', X + (TOWN.passX0 + TOWN.passX1) / 2, Y + TOWN.H - 24, { size: 16, color: COL.dim, align: 'center' });
     TOWN.buildings.forEach((b) => {
-      const bx = X + b.x; const by = Y + b.y; const cx = bx + b.w / 2;
-      if (b.kind === 'closed') {
+      const bx = X + b.x; const by = Y + b.y; const cx = bx + b.w / 2; const kind = DevWalk.kind(s, b);
+      if (kind === 'closed') {
         // [C64] a blank building with no door (crystite shop / assay office: Tournament only).
         r.panel(bx, by, b.w, b.h, { fill: 'rgba(70,62,30,0.9)', border: '#8a7a3a' });
         r.text(b.label, cx, by + b.h / 2 - 20, { size: 16, color: '#cbbd7a', align: 'center', maxW: b.w - 12 });
         r.text('tancat', cx, by + b.h / 2 + 4, { size: 14, color: '#a99c66', align: 'center' });
         return;
       }
-      const color = b.kind === 'shop' ? RESOURCE_DEFS[b.res].color : b.kind === 'pub' ? '#ff7ab0' : b.kind === 'land' ? COL.good : COL.amber;
+      const color = b.kind === 'shop' ? RESOURCE_DEFS[b.res].color : b.kind === 'pub' ? '#ff7ab0' : b.kind === 'land' ? COL.good : b.kind === 'assay' ? '#d77bff' : COL.amber;
       r.panel(bx, by, b.w, b.h, { fill: 'rgba(12,17,31,0.96)', border: color });
       const dy = b.door === 'bottom' ? by + b.h - 8 : by;
       c.fillStyle = color; c.fillRect(cx - 36, dy, 72, 8);
@@ -184,6 +184,14 @@ class MapScreen {
         c.fillStyle = '#ffcf5a'; c.fillRect(cx - 14, by + 50, 28, 34); c.fillStyle = '#fff'; c.fillRect(cx - 14, by + 44, 28, 9);
         c.strokeStyle = '#ffcf5a'; c.lineWidth = 4; c.beginPath(); c.arc(cx + 16, by + 66, 8, -Math.PI / 2, Math.PI / 2); c.stroke();
         r.text('Acaba el torn', cx, by + 98, { size: 14, color: COL.dim, align: 'center', maxW: b.w - 12 });
+      } else if (b.kind === 'assay') {
+        // Assay office (Tournament): a magnifier over a soil sample — our own drawing.
+        r.text(b.label, cx, ty, { size: 16, color, align: 'center', maxW: b.w - 12 });
+        c.fillStyle = '#8a6a4a'; c.fillRect(cx - 22, by + 70, 30, 14);
+        c.strokeStyle = '#e8ecf5'; c.lineWidth = 4; c.beginPath(); c.arc(cx + 2, by + 58, 13, 0, Math.PI * 2); c.stroke();
+        c.beginPath(); c.moveTo(cx + 11, by + 67); c.lineTo(cx + 22, by + 80); c.stroke();
+        const ask = walk && walk.assay ? (walk.assay.plotId === null ? 'Porta una mostra' : 'Mostra a punt') : 'Assaig de crystite';
+        r.text(ask, cx, by + 98, { size: 14, color: walk && walk.assay ? COL.amber : COL.dim, align: 'center', maxW: b.w - 12 });
       } else {
         r.text(b.label, cx, ty, { size: 16, color, align: 'center', maxW: b.w - 12 });
         c.fillStyle = '#e8ecf5'; c.fillRect(cx - 18, by + 46, 36, 42); c.fillStyle = COL.good;
@@ -359,21 +367,27 @@ class MapScreen {
         const k = dev.order.indexOf(p.id);
         r.text(current ? `▶ torn ${k + 1}/4` : k < dev.idx ? `fet (${k + 1}/4)` : `espera (${k + 1}/4)`, X + W - 10, y + 32, { size: 16, color: current ? COL.cyan : COL.dim, align: 'right' });
       }
-      enabledResources().forEach((d, k) => { const x = X + 8 + k * 88; r.icon(d.id, x, y + 72, 24); r.text(String(p.inventory[d.id]), x + 30, y + 74, { size: 18 }); });
+      const goods = enabledResources(s); const gap = goods.length > 3 ? 66 : 88;
+      goods.forEach((d, k) => { const x = X + 8 + k * gap; r.icon(d.id, x, y + 72, 24); r.text(String(p.inventory[d.id]), x + 30, y + 74, { size: 18 }); });
       const mine = s.plots.filter((q) => q.ownerId === p.id);
       r.text(`${mine.length}P ${mine.filter((q) => q.ruc).length}R`, X + W - 10, y + 74, { size: 16, color: COL.dim, align: 'right' });
     });
     const y = 64 + 4 * 108;
     r.panel(X, y, W, 712 - y, {});
     r.text('Botiga', X + 10, y + 6, { size: 18, color: COL.cyan });
-    enabledResources().forEach((d, k) => {
+    const goods = enabledResources(s); const row = goods.length > 3 ? 26 : 30;
+    goods.forEach((d, k) => {
       const st = s.store.stock[d.id];
-      r.icon(d.id, X + 10, y + 32 + k * 30, 24);
-      r.text(`${st} u · compra ${StoreSystem.bid(s, d)} · ven ${st > 0 ? StoreSystem.ask(s, d) : '—'}`, X + 42, y + 34 + k * 30, { size: 16, maxW: 316 });
+      r.icon(d.id, X + 10, y + 30 + k * row, 22);
+      r.text(`${st} u · compra ${StoreSystem.bid(s, d)} · ven ${st > 0 ? StoreSystem.ask(s, d) : '—'}`, X + 42, y + 32 + k * row, { size: 16, maxW: 316 });
     });
-    r.text(`Corral: ${s.store.ruc} RUCs · ${StoreSystem.rucPrice(s)} cr`, X + 10, y + 34 + 3 * 30, { size: 16 });
+    const ly = y + 34 + goods.length * row;
+    r.text(`Corral: ${s.store.ruc} RUCs · ${StoreSystem.rucPrice(s)} cr`, X + 10, ly, { size: 16 });
     const sales = LandOffice.forSale(s);
-    if (sales.length) r.text(`En venda: ${sales.map((x) => `#${x.plotId + 1} (${playerById(s, x.pid).name})`).join(', ')}`, X + 10, y + 34 + 4 * 30 - 6, { size: 14, color: COL.amber, maxW: 348 });
+    if (sales.length) r.text(`En venda: ${sales.map((x) => `#${x.plotId + 1} (${playerById(s, x.pid).name})`).join(', ')}`, X + 10, ly + 24, { size: 14, color: COL.amber, maxW: 348 });
+    // Tournament: the human's assay results (an R.U.C. reminder; the C64 only prints the message, nothing is marked on the map).
+    const mine = s.crystite ? s.crystite.assays.filter((a) => a.pid === 'p0') : [];
+    if (mine.length) r.text(`Assaigs: ${mine.slice(-6).reverse().map((a) => `#${a.plotId + 1} ${CrystiteSystem.LEVEL_NAMES[a.level]}`).join(' · ')}`, X + 10, ly + (sales.length ? 44 : 24), { size: 14, color: '#d77bff', maxW: 348 });
   }
   /** Touch / pointer direction pad for walking: each arrow is held (pointer down) and released (pointer up). */
   drawPad(game, r, cx, cy) {

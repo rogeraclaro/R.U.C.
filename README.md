@@ -1,8 +1,8 @@
 # R.U.C.
 
 Reinterpretació de **M.U.L.E.** (Dani Bunten, 1983): un jugador contra tres rivals IA (Bran, Vela i Nox, tots Mechtrons),
-12 torns (6 al nivell Principiant), subhasta contínua en temps real. Fase A ajustada a les regles del M.U.L.E. original de Commodore 64 (joc «Standard» sense
-crystite), amb subhastes de terra. HTML, CSS i JavaScript vanilla amb Canvas 2D; cap dependència.
+12 torns (6 al nivell Principiant), subhasta contínua en temps real. Ajustada a les regles del M.U.L.E. original de Commodore 64: nivells
+Principiant, Estàndard i Torneig (amb crystite, oficina d'assaig i col·lusió), amb subhastes de terra. HTML, CSS i JavaScript vanilla amb Canvas 2D; cap dependència.
 
 ## Com obrir-lo
 
@@ -19,8 +19,8 @@ Funciona sense connexió. No hi ha CDN, npm, bundler ni IA en temps d'execució.
   i el temps de torn: **Flapper 1600 cr** i temps ×9/7, **Humanoid 600 cr** i temps ×5/7, la resta 1000 cr i temps normal. Els rivals de
   l'ordinador són sempre Mechtrons amb 1000 cr. Els dibuixos de les espècies són propis (no hi ha asset); l'Humanoid fa servir el retrat
   `colonists_strip` del teu color.
-- **Nivell**: **Estàndard** (per defecte, 12 mesos, regles completes) o **Principiant** (6 mesos). Torneig surt desactivat (cal crystite,
-  Fase B). La IA no té nivell de força (l'original no en té): reacció 400–900 ms, error de valoració ±8 %, reserva mínima 3 (`CONFIG.AI`,
+- **Nivell**: **Estàndard** (per defecte, 12 mesos, regles completes), **Principiant** (6 mesos) o **Torneig** (12 mesos, crystite,
+  assaig i col·lusió; vegeu [Torneig](#torneig)). La IA no té nivell de força (l'original no en té): reacció 400–900 ms, error de valoració ±8 %, reserva mínima 3 (`CONFIG.AI`,
   els antics valors «Colònia»).
 - Principiant ([codi Atari]): 8 menjar i 4 energia per colon; botiga 16 menjar / 16 energia / 0 smithore i 25 RUCs, i cada torn torna a
   0 smithore i 25 RUCs; sense variació de collita; smithore fix a 50; unitat de temps +2 BTU (×9/7); cursor de terra a 32 fotogrames per
@@ -59,8 +59,8 @@ rellotge no corre fins que prems Acció, `Enter`, `Espai` o hi fas clic.
 
 El temps que queda és una **barra vertical** del teu color a la vora dreta del mapa (alçada = unitats que queden).
 
-El colon apareix al poble (casella central del mapa). **Poble** ([C64]): a dalt, la botiga de crystite (tancada, sense porta), i els
-tallers de smithore, energia i menjar; a baix, l'oficina d'assaig (tancada), l'**oficina de terres**, el **pub** i el **corral**, amb el
+El colon apareix al poble (casella central del mapa). **Poble** ([C64]): a dalt, la botiga de crystite (tancada, sense porta, fora del
+Torneig), i els tallers de smithore, energia i menjar; a baix, l'oficina d'assaig (tancada fora del Torneig), l'**oficina de terres**, el **pub** i el **corral**, amb el
 rètol «RUCs 100 cr» (el preu actual). A sota del poble, «Els teus diners: N cr». Amb les fletxes (o el control tàctil de la dreta del panell) camina en temps real;
 el rellotge corre sempre, també mentre camines o estàs parat.
 
@@ -140,7 +140,7 @@ rellotge del joc. A la pantalla final, **Repetir llavor** i **Nova llavor**. Amb
 
 ## Desat
 
-Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **7**: nivell, espècie, parcel·les en venda, preu de l'última subhasta de terres, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
+Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **8**: nivell, dipòsits de crystite, mapa conegut de la IA i assaigs del Torneig, espècie, parcel·les en venda, preu de l'última subhasta de terres, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
 **Continuar** al títol reprèn a la fase desada.
 
 «Desa i surt al títol» (menú de pausa) escriu un desat exacte a les fases **represables**: cursa de terra, desenvolupament (posició, RUC que
@@ -148,7 +148,7 @@ portes, rellotge, Wampus, ordre i esdeveniments ja sortejats), subhastes de terr
 l'últim desat de frontera, perquè tornar-hi a mitja fase podria aplicar-ne els efectes dues vegades. La liquidació del torn queda desada
 a l'estat (`settlement`) i no es torna a executar mai.
 
-**Desats antics:** un desat dels esquemes 1 a 5 (regles anteriors: estocs inicials, preus, temps, patrimoni, esdeveniments, dificultats, subhastes) **no es migra**: el joc avisa al títol que
+**Desats antics:** un desat dels esquemes 1 a 7 (regles anteriors: estocs inicials, preus, temps, patrimoni, esdeveniments, dificultats, subhastes) **no es migra**: el joc avisa al títol que
 és d'una versió anterior amb unes altres regles i l'esborra. Un desat malmès també s'avisa. Cap desat incompatible s'accepta en silenci.
 
 ## Paràmetres d'URL (proves i depuració)
@@ -303,18 +303,18 @@ Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
 | La fam no costa diners: només redueix el temps de desenvolupament | manual (el menjar determina el temps) | deute eliminat |
 | Inventari inicial de cada colon: 4 menjar, 2 energia (Principiant 8 / 4) | codi Atari, C64 | `CONFIG.START_INV`, `CONFIG.LEVELS` |
 | Botiga inicial 8 menjar / 8 energia / 8 smithore; 14 RUCs al corral (el manual en diu 16); Principiant 16 / 16 / 0 i 25 RUCs, restablerts cada torn | codi Atari, C64 | `CONFIG.STORE_START`, `RUC_START`, `levelRules`, `StoreSystem.betweenTurns` |
-| Nivells: Principiant 6 torns, Estàndard 12; Torneig desactivat | codi Atari, C64 | `CONFIG.LEVELS`, `lastRound` |
+| Nivells: Principiant 6 torns, Estàndard 12, Torneig 12 | codi Atari, C64 | `CONFIG.LEVELS`, `lastRound` |
 | Espècies: Flapper 1600 cr i +2 BTU per unitat, Humanoid 600 cr i −2 BTU, la resta 1000 cr; ordinadors = Mechtrons amb 1000 cr | codi Atari, C64 | `CONFIG.SPECIES`, `ConsumptionSystem.unitFrames` |
 | Pub: bonificació 50/100/150/200 + (aleatori 0..255 mod 2 × unitats que queden), 250 si la suma passa de 255; acaba el torn | codi Atari, C64 | `PubSystem`, `DevWalk.enter` |
 | Wampus: recompensa 100 × (torn / 4 enter + 1); primera aparició després de Ta/4 unitats (Ta = BTU esperats abans de prémer el botó, màx. 255; −100 si hi ha hagut esdeveniment personal); visible 1–4 unitats, després amagat: 50 % es queda 4–7 unitats, 50 % canvia a una muntanya a l'atzar al cap de 2 unitats; no surt si ets a la seva muntanya; un cop per torn, mai portant un RUC, els ordinadors mai; caçar-lo no acaba el torn | codi Atari, manual, C64 | `WampusSystem`, `DevWalk.act`, `MapScreen.drawWampus` |
 | IA: instal·la mentre li queden ≥ 35 unitats (cada instal·lació costa 25 + 2 × distància al poble) i després va al pub si en queden ≥ 3 | codi Atari | `AISystem.turn` |
 | «Prem el botó per començar» i barra de temps vertical del color del jugador a la dreta del mapa | C64 | `Game.devStart`, `MapScreen.timeBar` |
-| Poble: crystite (tancat) · smithore · energia · menjar / assaig (tancat) · oficina de terres · pub · corral «RUCs 100 cr»; «Els teus diners» a sota | C64 | `TOWN`, `MapScreen.drawTown` |
+| Poble: crystite (tancat fora del Torneig) · smithore · energia · menjar / assaig (tancat fora del Torneig) · oficina de terres · pub · corral «RUCs 100 cr»; «Els teus diners» a sota | C64 | `TOWN`, `MapScreen.drawTown` |
 | Cursor de terra 16 fotogrames per parcel·la (Principiant 32) i pausa de 4 passos després d'una reclamació | C64, codi Atari | `LandRace.create` |
 | Caminar: mapa 0,667 / 0,333 px per fotograma (h / v) sobre parcel·les de 32 px, poble 1,33 px per fotograma (h); terreny 6 / 14 / 21 fotogrames per pas | C64, codi Atari | `CONFIG.WALK`, `DevWalk.speed` |
 | Valoració de la colònia round((total − 10.000) / 20.000) a 0..6 amb els 7 textos; First Founder només si ≥ 3 i al final | codi Atari | `ScoringSystem.rating`, `COLONY_RATINGS`, `Game.finish` |
 | Entre torns la botiga fabrica min(14 − corral, smithore / 2) RUCs, 2 smithore cadascun; corral màxim 14; sense reposició gratuïta | codi Atari | `StoreSystem.betweenTurns`, `CONFIG.RUC_MAX` |
-| Equip: menjar 25, energia 50, smithore 75 | manual, C64 | `CONFIG.MODULE_COST` |
+| Equip: menjar 25, energia 50, smithore 75, crystite 100 (Torneig) | manual, C64, codi Atari | `CONFIG.MODULE_COST` |
 | Menjar necessari per torn: 3 (torns 1-4), 4 (5-8), 5 (9-12) | codi Atari, C64 | `CONFIG.FOOD_NEED` |
 | Temps de desenvolupament: 10 + floor(91 × min(1, menjar/necessitat)) unitats de 28 fotogrames PAL (≈ 56,4 s amb prou menjar) | codi Atari, C64 | `ConsumptionSystem.devUnits`, `humanTimeMs` |
 | Escassetat d'energia: per cada unitat que falta, un RUC no energètic triat a l'atzar (PRNG sembrat) no produeix | codi Atari | `ProductionSystem.activation` |
@@ -342,12 +342,20 @@ Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
 | Parcel·la perduda = la pròpia amb l'índex més alt (amb el seu RUC); parcel·la extra = una lliure a l'atzar | codi Atari | `EventSystem.build` |
 | Planetaris: un per torn 1–11 d'una bossa sense reposició (plaga 3, pirates 2, pluja àcida 3, terratrèmol 3, taques solars 3, meteorit 2, radiació 2, incendi 2); el tiquet es gasta encara que no hi hagi objectiu; torn 12 «La nau ha tornat!» | codi Atari | `EventSystem.drawPlanet`, fases `PLANET_EVENT` / `PLANET_EVENT_AFTER` |
 | Taques solars +3 d'energia per parcel·la (màx. 8); pluja àcida: fila del núvol menjar +4 / energia −2, la resta +1 / −1 (0..8); terratrèmol: mineria a la meitat | codi Atari | `ProductionSystem.applyEvents` |
-| Meteorit: parcel·la que no sigui poble ni riu; en destrueix el RUC i hi deixa un dipòsit de crystite (`hiddenDeposit` = 4, per a la Fase B); el text del crystite només surt al Torneig | codi Atari | `EventSystem.build` |
+| Meteorit: parcel·la que no sigui poble ni riu; en destrueix el RUC i hi deixa un dipòsit de crystite (`hiddenDeposit` = 4, sense difusió; la IA el coneix); «El meteorit crea un nou jaciment de crystite.» només al Torneig | codi Atari | `EventSystem.build` |
 | Radiació (abans de la producció): fuig un RUC del 1r o 2n; plaga (després): una parcel·la de menjar amb producció del 1r o 2n la perd tota | codi Atari | `EventSystem.build`, `scanPlots` |
-| Pirates (Standard, després de la producció): tot el smithore dels colons **i de la botiga**, i la producció de smithore del torn; incendi: la botiga es queda sense menjar, energia ni smithore | codi Atari, manual | `EventSystem.build` |
+| Pirates (després de la producció): Estàndard i Principiant, tot el smithore dels colons **i de la botiga** i la producció de smithore del torn; Torneig, tot el crystite dels colons i la producció de crystite del torn (el smithore no es toca); incendi: la botiga es queda sense menjar, energia ni smithore | codi Atari, manual | `EventSystem.build` |
 | Parcel·la = 500; objectiu de colònia 60.000 (valoració ≥ 3) sense mínim per colon | manual, codi Atari | `ScoringSystem`, `Game.finish` |
 | Patrimoni: efectiu + béns al preu P de la botiga + 500 per parcel·la + per cada RUC instal·lat el cost de l'equip + 35 | codi Atari | `ScoringSystem.breakdown`, `CONFIG.RUC_WORTH` |
 | Fracàs immediat si no hi ha cap RUC de menjar (o d'energia) i no en queda cap unitat enlloc (colons + botiga) | codi Atari | `ScoringSystem.colonyFailure`, fase `NEXT` |
+| Torneig: cursor de terra 3 BTU (12 fotogrames), ATU 25, ordinadors amb 1200 cr (humans segons l'espècie), variació d'amplitud 2 (±4: 0 al 37,7 %, ±1 24,3 %, ±2 6,2 %), 0–5 parcel·les de colònia per torn (31,1 / 37,7 / 24,3 / 6,2 / 0,6 %) | codi Atari | `CONFIG.LEVELS.tournament`, `levelRules`, `LandAuction.colonyCount` |
+| Dipòsits de crystite: 3 llavors HIGH en parcel·les diferents a l'atzar (riu i poble inclosos), diamant 3 − distància (guanya el més alt); riu i poble a −1 (no s'hi mina) però la difusió hi passa | codi Atari | `CrystiteSystem.create` |
+| Producció de crystite: nivell del dipòsit + veí + corba d'aprenentatge + variació; necessita 1 energia; res al riu; es perd per sobre de 50 | codi Atari | `ProductionSystem.baseYield`, `SettlementSystem` |
+| Preu del crystite 50 + aleatori(0..99) cada torn; la botiga compra a P arrodonit avall a múltiple de 4 i ven a aquest + 140; $4 per pas; l'estoc de la botiga torna a 0 després de cada subhasta de crystite; la subhasta només es fa si algú en té; compta al patrimoni al preu P | codi Atari, manual | `CrystiteSystem.drawPrice`, `StoreSystem.bid/ask`, `CrystiteSystem.shipOff` |
+| Oficina d'assaig: «Agafa una mostra del sòl i torna» → Acció sobre qualsevol parcel·la («Mostra a punt: torna a l'oficina»; una segona: «Una parcel·la per viatge») → tornar-hi: «No / Poc / Mitjà / Molt crystite a la parcel·la #n»; sense mostra: «Cal una mostra»; el meteorit (4) surt com a Molt; el rellotge continua | codi Atari | `DevWalk.assayOffice`, `takeSample` |
+| Assaig de la IA: després d'instal·lar i abans del pub; 10 + 2 × distància unitats, no amb menys de 22, cap si ja coneix 3 HIGH; primer les seves parcel·les i després les lliures, mai riu ni conegudes, 1/8 de probabilitat per candidata, preferència pel valor deduït (diamant al voltant d'un 2 o 3); també aprèn dels RUCs de crystite i dels meteorits | codi Atari | `CrystiteSystem.aiAssay`, `deduced` |
+| IA del Torneig: compra tot l'estoc de la botiga (menjar/energia, només compradors, estoc ≤ 20); ven només aleatori(0..excedent) si l'excedent és petit (menjar < 6, energia < 9, preu ≤ 80); crystite: amb P < 100 només ven l'excés sobre 50 o el que li cal per arribar a 1000 cr, sense crystite en compra si P < 86 i té ≥ 1100 cr ((efectiu − 800) / P, màx. 25) | codi Atari | `AISystem.decide`, `decideCrystite`, `CONFIG.AI_TOURNAMENT` |
+| Col·lusió (subhastes de béns del Torneig): ≥ 2 humans premen el botó en 10 jiffies, amb almenys un comprador i un venedor; «COL·LUSIÓ» parpelleja 3 cops (fons rosa), la resta i la botiga queden fora, temporitzador propi de 50 unitats, el principal es desa i es reprèn; «La col·lusió s'ha acabat»; es pot repetir; 100 jiffies entre premudes; els ordinadors mai | codi Atari, manual | `AuctionEngine.collusionPress`, `Game.auctionButton` |
 
 ### Valors provisionals i proves pendents
 
@@ -375,22 +383,30 @@ Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
 | RUC sense equipar premut sobre la casa | no consta | no s'instal·la i no fuig (avís) | baixa | Provar-ho en emulador |
 | Empat de patrimoni en l'ordre de desenvolupament i a la subhasta | no consta | ordre de jugador estable; a la subhasta, temps d'espera i clau sembrada | baixa | — |
 | Velocitat vertical al poble i geometria del poble | C64: només s'ha mesurat l'horitzontal (1,33 px/fotograma) | 0,667 px/fotograma en vertical (la meitat, com al mapa); carrer i passatge propis amb l'ordre d'edificis del C64 | baixa | Cronometrar recorreguts verticals al poble en emulador |
-| «No s'hi admeten RUCs» al pub i a l'oficina de terres | C64: la cadena «NO MULES ALLOWED» existeix, però no se sap a quins edificis surt | no s'hi pot entrar amb un RUC (no fuig) | baixa | Entrar al pub amb un RUC en emulador |
+| «No s'hi admeten RUCs» al pub i a les oficines de terres i d'assaig | C64: la cadena «NO MULES ALLOWED» existeix, però no se sap a quins edificis surt | no s'hi pot entrar amb un RUC (no fuig) | baixa | Entrar al pub amb un RUC en emulador |
 | Wampus: ordre entre el sostre de 255 BTU i el −100 de l'esdeveniment, arrodoniment a unitats senceres, punt exacte de la llum dins la parcel·la, caçar-lo amb Acció sobre la parcel·la, i el Principiant | codi Atari: les regles; manual: «salta-hi a sobre» i «si prems el botó el fas fora» (no es reprodueix) | sostre i després −100 (mínim 0), unitats senceres a la baixa, cantonada superior dreta, Acció en qualsevol punt de la parcel·la; també al Principiant | baixa | Caçar el Wampus en emulador (Estàndard i Principiant) |
 | Rellotge a l'oficina de terres | manual: el temps s'atura mentre marques la parcel·la | el rellotge continua corrent | baixa | Comprovar-ho en emulador |
 | Fi del torn portant un RUC al Principiant | codi Atari: només documenta que un premut equivocat «només avisa» | fuig igual que a l'Estàndard | baixa | Esgotar el temps amb un RUC al Principiant |
 | Valors de la IA (reacció 400–900 ms, error ±8 %, reserva 3) i comportament a la subhasta | l'original no té nivells de IA i no se n'ha transcrit el comportament de subhasta | antics valors «Colònia» (`CONFIG.AI`); a la subhasta de béns deixa de comprar / vendre en arribar al seu límit | — | Transcriure la IA de subhasta del desassemblatge |
+| Mostra d'assaig al riu | codi Atari: llegeix −1 i la comparació sense signe ho mostra com a HIGH (probablement un error) | «No crystite» (correcció de R.U.C.) | mitjana | Fer un assaig al riu en emulador |
+| Assaig de la IA: final de la passada sense triar cap candidata | codi Atari: no llegit | la passada torna a començar fins que en tria una | baixa | — |
+| IA del Torneig: «prou efectiu» per retenir l'excedent, i quan instal·la crystite | codi Atari: no quantificat / no transcrit | ≥ 300 cr; instal·la crystite en una parcel·la pròpia lliure amb un 2 o 3 conegut; la valoració de terra suma 1,5 × nivell conegut (≥ 2) | baixa | — |
+| Col·lusió: durada en segons al C64 i què passa durant el parpelleig | codi Atari: 50 ATU (25 fotogrames, 6 sense joystick) | 50 unitats al ritme normal de la subhasta (ATU 25); durant el parpelleig i el missatge final no hi ha operacions ni rellotge | mitjana | Cronometrar una col·lusió en emulador |
+| Llista d'assaigs al panell lateral | no és del C64 (l'original només mostra el missatge; res al mapa) | els teus resultats (fins a 6) al panell de la botiga | — (comoditat de R.U.C.) | — |
 | Instal·lació i fugida animades (pujada/afegit/baixada del RUC; espurneig i sortida corrents); casa = tota la parcel·la | no són regles del C64, són decisions de disseny pròpies | 1800 ms d'instal·lació, 400+900 ms de fugida (`CONFIG.WALK.installMs/fleeShuffleMs/fleeRunMs`) | — (no aplica: no és una afirmació de fidelitat) | — |
 | Botiga/corral: el colon es queda a la porta i només el RUC camina fins al taulell i torna | no és una regla del C64, és una decisió de disseny pròpia | cal empènyer 350 ms a la porta perquè comprometi la visita; 2200 ms de viatge del RUC (`CONFIG.WALK.doorHoldMs/visitMs`) | — (no aplica) | — |
 
 ### Ajornat (fora d'aquest encàrrec)
 
-- Fase B: crystite, assay, collusion (`FEATURES.crystite` a `false`; el preu del crystite no s'ha tocat).
+- Diversos jugadors humans (lot 9): la col·lusió ja funciona al motor, però amb un sol humà no es pot produir mai.
+- Col·lusió a les subhastes de terres: només la descriu el manual; no se n'ha trobat el codi.
 
-## Fase B (preparada, no visible)
+## Torneig
 
-`FEATURES.crystite` és `false` i no es mostra cap control (`FEATURES.landAuctions` ja és `true`). Els punts d'extensió existeixen:
-`RESOURCE.CRYSTITE` a `RESOURCE_DEFS` amb `enabled:false` (producció, malbaratament i subhasta recorren el registre; `AUCTION_ORDER` ja
-reserva el lloc del crystite entre smithore i menjar); `hiddenDeposit` a cada parcel·la; `TurnSystem.insertAfter/insertBefore` i el hook
-`afterDevelopment`; `InputManager` amb contexts independents; `AuctionEngine` rep una `marketDefinition` i lots genèrics
-(`{ id, kind, quantity, sellerId, transferable, getValue(), transfer() }`). Els self-tests demostren un 4t recurs i un lot únic genèric (la subhasta de terres real és `LandAuction`, ascendent).
+Implementat segons `docs/research/tournament.md` (§1–4). El crystite és un 4t recurs del registre (`RESOURCE_DEFS.crystite`) que només
+s'activa al Torneig (`levelRules(state).crystite`; `enabledResources(state)`), de manera que l'Estàndard i el Principiant no canvien gens
+(ni el flux del PRNG). Els dipòsits es generen en crear la partida i són ocults (`plot.hiddenDeposit`); `state.crystite` guarda les
+llavors, el mapa conegut de la IA i els teus assaigs. Al poble s'obren la **botiga de crystite** (equip 100 cr) i l'**oficina d'assaig**.
+La subhasta de crystite va entre la de smithore i la de menjar i només es fa si algú en té. A les subhastes, **Enter** és el botó del
+joystick: amb dos humans (lot 9) dispara la **col·lusió** (`Game.auctionButton(pid)` → `AuctionEngine.collusionPress`); amb un sol humà
+no passa res. Icones del crystite (cristall violeta) i del seu mòdul dibuixades amb codi (`PROCEDURAL_ART`), sense asset.

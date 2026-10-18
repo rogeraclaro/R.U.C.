@@ -5,7 +5,7 @@ class ProductionScreen {
     const s = game.state; const prod = game.rt.prod; const T = CONFIG.TILE;
     r.asset('bg_irata_sky', 0, 0, CONFIG.W, CONFIG.H); r.dim(0.55);
     Hud.draw(game, r);
-    r.text('Producció: cada RUC de menjar o smithore gasta 1 energia', 16, 66, { size: 20, color: COL.amber, maxW: 860 });
+    r.text(`Producció: cada RUC de menjar${levelRules(s).crystite ? ', smithore o crystite' : ' o smithore'} gasta 1 energia`, 16, 66, { size: 20, color: COL.amber, maxW: 860 });
     const order = prod.order; const t = prod.t;
     const t0 = 800; const t1 = prod.duration - 1300;
     const per = order.length ? (t1 - t0) / order.length : 1;
@@ -40,7 +40,7 @@ class ProductionScreen {
     if (t >= prod.duration - 1300 || game.settings.reduceMotion) {
       prod.reports.forEach((rep, i) => {
         const p = playerById(s, rep.playerId);
-        r.text(`${p.name}: ${enabledResources().map((d) => `${d.label} +${rep.produced[d.id] || 0}`).join(' · ')}${rep.stopped ? ` · sense energia ${rep.stopped}` : ''}`, X + 12, Y + 8 + i * 25, { size: 18, color: p.isHuman ? COL.amber : COL.text, maxW: 700 });
+        r.text(`${p.name}: ${enabledResources(s).map((d) => `${d.label} +${rep.produced[d.id] || 0}`).join(' · ')}${rep.stopped ? ` · sense energia ${rep.stopped}` : ''}`, X + 12, Y + 8 + i * 25, { size: 18, color: p.isHuman ? COL.amber : COL.text, maxW: 700 });
       });
       r.button('prod-next', 'Continuar', X + 720, Y + 76, 132, 38, { primary: true, onClick: () => game.skipPhase() });
     } else {

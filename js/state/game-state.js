@@ -1,16 +1,20 @@
 'use strict';
 const GameState = {
-  /** `level`: CONFIG.LEVELS id (Tournament is disabled and falls back to Standard). `species`: the human's ([C64] computers are Mechtrons). */
+  /** `level`: CONFIG.LEVELS id (unknown or disabled: Standard). `species`: the human's ([C64] computers are Mechtrons). */
   create({ seed, level = 'standard', species = 'mechtron', playerName = 'Roger', colorId = 'yellow' }) {
     if (!CONFIG.LEVELS[level] || CONFIG.LEVELS[level].disabled) level = 'standard';
     const rules = levelRules({ level });
     const rng = new SeededRNG(seed);
     const plots = Plot.generateMap(rng);
+    // [Atari code] Tournament: the hidden crystite deposits (generated only where crystite plays, so other levels keep their PRNG stream).
+    const crystite = rules.crystite ? CrystiteSystem.create(plots, rng) : null;
     const palette = CONFIG.PLAYER_COLORS;
     const human = palette.find((c) => c.id === colorId) || palette[0];
     const rest = palette.filter((c) => c.id !== human.id);
     const players = [PlayerState.create('p0', playerName || 'Roger', human.hex, true, null, CONFIG.SHAPES[0], speciesById(species).id, rules.startInv)];
     CONFIG.AI_NAMES.forEach((ai, i) => players.push(PlayerState.create(`p${i + 1}`, ai.name, rest[i].hex, false, ai.profile, CONFIG.SHAPES[i + 1], 'mechtron', rules.startInv)));
+    // [Atari code][manual] Tournament: the computers get an extra $200 ($1200); humans keep their species' money.
+    if (rules.aiCash) players.filter((p) => !p.isHuman).forEach((p) => { p.cash = p.score = p.lastTurnNetWorth = rules.aiCash; });
     const state = {
       schemaVersion: CONFIG.SCHEMA_VERSION, seed: String(seed), rngState: rng.getState(), level,
       turn: 0, phase: 'TURN_START', phaseData: {}, players, plots, store: StoreState.create(rules),
@@ -28,6 +32,8 @@ const GameState = {
       landSales: [],
       // [Atari code] the last land-auction set's average price (the next set starts $60 below it; null = none yet, start at $160).
       landAuction: { lastAvg: null },
+      // Tournament only (null elsewhere): deposit seeds, the computers' known crystite map and the human's assay results (CrystiteSystem).
+      crystite,
       savedAt: 0, createdAt: 0
     };
     Object.keys(RESOURCE_DEFS).forEach((k) => { state.ext.items[k] = 0; state.storePrice[k] = RESOURCE_DEFS[k].basePrice; });

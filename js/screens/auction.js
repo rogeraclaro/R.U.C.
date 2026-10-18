@@ -1,16 +1,24 @@
 'use strict';
 const AUC = { axisX: 100, lanesX: 120, laneStep: 152, laneW: 146, storeX: 736, storeW: 140, sliderX: 912, top: 156, bottom: 536, statsX: 984 };
 /** [C64] auction messages, faithful Catalan ("SELLER AT CRITICAL LEVEL!", "BUYER'S STRAPPED", "STORE HAS RUN DRY!"). */
-const AUCTION_NOTICES = { critical: 'Venedor al nivell crític!', no_cash: 'El comprador no té diners', store_dry: 'La botiga s\'ha quedat sense estoc!' };
+const AUCTION_NOTICES = {
+  critical: 'Venedor al nivell crític!', no_cash: 'El comprador no té diners', store_dry: 'La botiga s\'ha quedat sense estoc!',
+  // [Atari code] Tournament collusion: "COLLUSION" (flashes 3 times) and "COLLUSION IS OVER".
+  collusion: 'COL·LUSIÓ', collusion_over: 'La col·lusió s\'ha acabat'
+};
 
 class AuctionScreen {
   /** The price axis is a window [lo, hi] that only grows during an auction (colonists may bid past the store ceiling). */
   priceY(v, price) { return AUC.bottom - (price - v.lo) / (v.hi - v.lo) * (AUC.bottom - AUC.top); }
   yPrice(v, y) { return v.lo + (AUC.bottom - y) / (AUC.bottom - AUC.top) * (v.hi - v.lo); }
   laneX(i) { return AUC.lanesX + i * AUC.laneStep; }
-  /** Declaration: ↑/→ seller, ↓/← buyer, Space in/out. Trade stage: held ↑/↓ are polled by Game.updateAuctionInput. */
+  /**
+   * Declaration: ↑/→ seller, ↓/← buyer, Space in/out. Trade stage: held ↑/↓ are polled by Game.updateAuctionInput; Enter is the stick
+   * button ([Atari code] the collusion trigger in Tournament, which needs two humans: Game.auctionButton).
+   */
   onKey(game, e) {
     const a = game.rt.auction; if (!a || a.engine.ended || game.paused) return false;
+    if (e.key === 'Enter' && a.engine.stage === 'trade') { game.auctionButton('p0'); return true; }
     if (a.engine.canDeclare()) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { game.auctionRole(ROLE.SELLER); return true; }
       if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { game.auctionRole(ROLE.BUYER); return true; }
@@ -26,17 +34,22 @@ class AuctionScreen {
     r.glyph(shape, x + (kind === ROLE.BUYER ? -2 : 2), y, 4, '#05070d', null);
   }
   draw(game, r) {
-    const s = game.state; const a = game.rt.auction; const e = a.engine; const m = e.market; const human = s.players[0];
+    const s = game.state; const a = game.rt.auction;
+    if (!a) { r.asset('auction_hall_bg', 0, 0, CONFIG.W, CONFIG.H); r.dim(0.35); Hud.draw(game, r); return; } // a skipped auction
+    const e = a.engine; const m = e.market; const human = s.players[0]; const col = e.collusion;
     const v = game.auctionView(); const py = (p) => clamp(this.priceY(v, p), AUC.top - 8, AUC.bottom + 8);
     const declaring = e.canDeclare(); const live = !game.paused && !e.ended;
     r.asset('auction_hall_bg', 0, 0, CONFIG.W, CONFIG.H); r.dim(0.35);
+    // [Atari code][manual] collusion: the background turns pink (COLOR4 = $48) while it lasts.
+    if (col) { r.ctx.fillStyle = 'rgba(200,70,150,0.28)'; r.ctx.fillRect(0, 0, CONFIG.W, CONFIG.H); }
     Hud.draw(game, r);
     r.icon(m.id, 16, 62, 30);
     r.text(`Subhasta de ${m.label.toLowerCase()}`, 54, 64, { size: 24, color: COL.amber });
     // [C64] time bar in units: declaration 31, trading 72 (slower while a trade runs or a stick is pushed).
-    const frac = e.units / e.unitsTotal;
-    r.bar(400, 62, 560, 14, frac, declaring ? COL.amber : frac < 0.2 ? COL.bad : COL.cyan);
-    r.text(`${Math.ceil(e.units)}`, 972, 60, { size: 20, color: declaring ? COL.amber : COL.text });
+    // During a collusion its own 50-unit timer is shown (the main one is saved and resumes afterwards).
+    const frac = col ? col.units / col.unitsTotal : e.units / e.unitsTotal;
+    r.bar(400, 62, 560, 14, frac, col ? '#ff7ad0' : declaring ? COL.amber : frac < 0.2 ? COL.bad : COL.cyan);
+    r.text(`${Math.ceil(col ? col.units : e.units)}`, 972, 60, { size: 20, color: col ? '#ff7ad0' : declaring ? COL.amber : COL.text });
     if (declaring) r.text('Declareu-vos compradors o venedors', 400, 80, { size: 16, color: COL.amber });
     else if (e.contact.key && e.contact.units) r.text(`${e.contact.units} unitats negociades`, 400, 80, { size: 16, color: COL.good });
     const note = e.notice && e.clock - e.notice.at < 1500 ? AUCTION_NOTICES[e.notice.kind] : null;
@@ -60,6 +73,7 @@ class AuctionScreen {
     // lanes
     s.players.forEach((p, i) => {
       const lx = this.laneX(i); const en = e.entry(p.id);
+      const frozen = !!col && !e.inPlay(en); if (frozen) { r.ctx.save(); r.ctx.globalAlpha = 0.4; }
       r.ctx.strokeStyle = p.color; r.ctx.globalAlpha = 0.35; r.ctx.lineWidth = 2; r.ctx.strokeRect(lx + 0.5, AUC.top - 24, AUC.laneW, AUC.bottom - AUC.top + 48); r.ctx.globalAlpha = 1;
       r.glyph(p.shape, lx + 14, AUC.top - 40, 8, p.color, '#05070d');
       r.text(p.name, lx + 28, AUC.top - 50, { size: 16, maxW: 110 });
@@ -71,6 +85,7 @@ class AuctionScreen {
       }
       this.drawStock(r, game, p, m, lx);
       r.text(`${p.cash} cr`, lx + 6, AUC.bottom + 44, { size: 16, color: COL.dim, maxW: AUC.laneW - 8 });
+      if (frozen) r.ctx.restore();
     });
     // store lane
     const sb = e.entry('store-b'); const ss = e.entry('store-s'); const sx = AUC.storeX; const stock = s.store.stock[m.id] || 0;
@@ -79,8 +94,9 @@ class AuctionScreen {
     r.text(`estoc ${stock}`, sx + 6, AUC.top - 26, { size: 16, color: COL.dim });
     // [C64] "STORE HAS N UNITS" while the colonists declare.
     if (declaring) r.text(`La botiga té ${stock} unitats`, sx + 6, AUC.bottom + 44, { size: 16, color: COL.amber, maxW: AUC.storeW + 160 });
-    if (sb.role !== ROLE.OUT) { this.drawMarker(r, ROLE.BUYER, sx + 34, py(sb.price), COL.amber, 'square', declaring); r.text(String(sb.price), sx + 50, py(sb.price) - 9, { size: 16 }); }
-    if (ss.role !== ROLE.OUT) { this.drawMarker(r, ROLE.SELLER, sx + 104, py(ss.price), COL.amber, 'square', declaring); r.text(String(ss.price), sx + 58, py(ss.price) - 9, { size: 16 }); }
+    if (col) r.wrap('La botiga no hi és', sx + 6, AUC.top + 10, AUC.storeW - 10, 18, { size: 16, color: '#ff7ad0' });
+    else if (sb.role !== ROLE.OUT) { this.drawMarker(r, ROLE.BUYER, sx + 34, py(sb.price), COL.amber, 'square', declaring); r.text(String(sb.price), sx + 50, py(sb.price) - 9, { size: 16 }); }
+    if (!col && ss.role !== ROLE.OUT) { this.drawMarker(r, ROLE.SELLER, sx + 104, py(ss.price), COL.amber, 'square', declaring); r.text(String(ss.price), sx + 58, py(ss.price) - 9, { size: 16 }); }
     if (!stock && !declaring) r.wrap('Sense estoc: preu lliure', sx + 6, AUC.bottom + 28, AUC.storeW - 10, 18, { size: 16, color: COL.bad });
     // contact: [Atari code] while a buyer's and a seller's lines touch, units change hands one by one (the line glows)
     if (e.contact.key) {
@@ -132,6 +148,7 @@ class AuctionScreen {
     r.button('a-down', 'Preu ▼', 858, Y, 120, 48, { disabled: !trading || hen.role === ROLE.OUT, onClick: () => { e.nudge('p0', -1, 1000, 4); e.push(); } });
     r.text(declaring ? 'Declara: ↑/→ venedor, ↓/← comprador, Espai fora. Després el rol és fix.' : '↑/↓ o roda: preu (Maj ×3). El rol ja no es pot canviar.', 30, Y + 56, { size: 16, color: declaring ? COL.amber : COL.dim, maxW: 760 });
     r.text('Línies en contacte: unitat a unitat', 800, Y + 56, { size: 16, color: COL.dim, maxW: 450 });
+    if (col) this.drawCollusion(game, r, col);
     if (e.ended) this.drawEnd(game, r);
     if (game.debug) game.drawDebugBar(r);
   }
@@ -149,6 +166,14 @@ class AuctionScreen {
       r.ctx.fillStyle = '#ffffff'; r.ctx.fillRect(cx - 3, gy - 3, 6, 16); r.ctx.fillStyle = '#05070d'; r.ctx.fillRect(cx - 1, gy - 2, 3, 14);
     }
     r.text(crit > 0 ? `${inv}u · crític ${crit}` : `${inv} unitats`, lx + 6, AUC.bottom + 6, { size: 16, color: crit > 0 && inv <= crit ? COL.bad : COL.text, maxW: AUC.laneW - 8 });
+  }
+  /** [Atari code] "COLLUSION" flashes 3 times (20 jiffies on, 20 off); at the end "COLLUSION IS OVER". */
+  drawCollusion(game, r, col) {
+    const on = col.stage === 'flash' ? Math.floor(col.ms / (AuctionEngine.collusionMs().flash / (2 * CONFIG.AUCTION.collusion.flashes))) % 2 === 0 : col.stage === 'active';
+    const text = col.stage === 'over' ? AUCTION_NOTICES.collusion_over : AUCTION_NOTICES.collusion;
+    if (!on && col.stage !== 'over') return;
+    r.panel(380, 92, 560, 40, { fill: 'rgba(60,10,45,0.92)', border: '#ff7ad0' });
+    r.text(col.stage === 'active' ? `${text}: ${col.members.map((id) => playerById(game.state, id).name).join(' i ')}` : text, 660, 100, { size: 22, color: '#ff7ad0', align: 'center', maxW: 540, fit: true });
   }
   drawChart(r, e, v, x, y, w, h) {
     const c = r.ctx;

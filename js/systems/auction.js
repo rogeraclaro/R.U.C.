@@ -8,6 +8,7 @@
  * Time runs in time-bar units whose length depends on what happens (AuctionEngine.timing, CONFIG.AUCTION).
  * [Atari code] While a buyer's line and a seller's line touch, units change hands one by one at an accelerating cadence.
  * The whole engine state is plain data: snapshot() / AuctionEngine.restore() let a save resume in the middle of an auction.
+ * [Atari code] Tournament collusion (collusionPress, `collusion`): see CONFIG.AUCTION.collusion.
  */
 class AuctionEngine {
   /** Fungible resource lot: 1 unit moves from seller to buyer. `critical` = the colonist's critical level of this good. */
@@ -16,7 +17,7 @@ class AuctionEngine {
       id: def.id, label: def.label, minPrice: def.minPrice, maxPrice: def.maxPrice, step: def.auctionStep,
       // Colonist-to-colonist limit while the store is out of stock: [manual] there is no rule cap; this is only a UI technical limit.
       playerMaxPrice: Math.max(def.maxPrice, CONFIG.AUCTION.playerPriceMax),
-      basePrice: def.basePrice, priceFloor: def.priceFloor, storeBuyOff: def.storeBuyOff, storeSellOff: def.storeSellOff, kind: 'fungible',
+      basePrice: def.basePrice, priceFloor: def.priceFloor, storeBuyOff: def.storeBuyOff, storeSellOff: def.storeSellOff, buyRound: def.buyRound, kind: 'fungible',
       critical: (state, p) => ConsumptionSystem.criticalLevel(state, p, def.id),
       createLot(state, sellerId) {
         return {
@@ -40,6 +41,11 @@ class AuctionEngine {
   }
   /** [Atari code] one marker step every 8 frames: the speed of every line, human or computer. */
   static lineMs() { return CONFIG.AUCTION.lineFrames * 1000 / CONFIG.DEV.palHz; }
+  /** [Atari code] collusion durations in ms (CONFIG.AUCTION.collusion counts jiffies = PAL frames). */
+  static collusionMs() {
+    const C = CONFIG.AUCTION.collusion; const f = (n) => n * 1000 / CONFIG.DEV.palHz;
+    return { window: f(C.windowFrames), cooldown: f(C.cooldownFrames), flash: f(C.flashFrames), over: f(C.overFrames) };
+  }
 
   /** `declare` false: the declaration has 0 units (roles can still be set before the first update, which starts the trade). */
   constructor({ market, state, rng, colonists, withStore = true, onTrade = null, declare = true, timing = AuctionEngine.timing(state) }) {
@@ -51,6 +57,8 @@ class AuctionEngine {
     this.trades = []; this.volume = 0; this.sum = 0; this.min = null; this.max = null;
     this.contact = AuctionEngine.noContact(); this.notice = null; this.allOutMs = 0; this.noOpMs = 0;
     this.withStore = withStore; this.storeStock = null;
+    // Collusion (Tournament): the running one (null = none), the recent button presses and each colonist's last press (cooldown).
+    this.collusion = null; this.presses = []; this.lastPress = {};
     const mid = Math.round((market.minPrice + market.maxPrice) / 4);
     const mk = (id, ownerId, isStore, role) => ({ id, ownerId, isStore, role, priceF: mid, price: mid, roleSince: 0, tie: rng.next() });
     this.entries = colonists.map((id) => mk(id, id, false, ROLE.OUT));
@@ -71,10 +79,41 @@ class AuctionEngine {
   get colonistEntries() { return this.entries.filter((e) => !e.isStore); }
   /** 0 at the start of the trade stage, 1 when its time is up (0 during the declaration). */
   progress() { return this.stage === 'trade' ? clamp(1 - this.units / this.unitsTotal, 0, 1) : 0; }
-  /** [manual] With the store out of stock, a colonist's price may go as high as buyers want; otherwise the store bounds apply. */
+  /** [manual] With the store out of stock (or out of a collusion), a colonist's price may go as high as buyers want. */
   playerMax() {
-    const stock = this.withStore ? (this.state.store.stock[this.market.id] || 0) : 0;
-    return this.withStore && stock > 0 ? this.market.maxPrice : (this.market.playerMaxPrice || this.market.maxPrice);
+    const stock = this.withStore && !this.collusion ? (this.state.store.stock[this.market.id] || 0) : 0;
+    return stock > 0 ? this.market.maxPrice : (this.market.playerMaxPrice || this.market.maxPrice);
+  }
+  /** [Atari code] during a collusion only the colluders trade (the others are frozen, the store is removed). */
+  inPlay(e) { return !this.collusion || (!e.isStore && this.collusion.members.includes(e.ownerId)); }
+  /**
+   * A human's stick button during the trade stage ([Atari code] sub_9926, Tournament only): a press edge is remembered; when the
+   * buttons of >= 2 humans are pressed within 10 jiffies, at least one a Buyer and one a Seller, the collusion starts. Each press has
+   * a 100-jiffy cooldown. Computers never press ($5C29: their button is hard-wired to "not pressed"). Returns true if the press counted.
+   * One human pressing alone can never collude; with several humans (Batch 9) each human's button maps here.
+   */
+  collusionPress(id) {
+    if (this.ended || this.stage !== 'trade' || this.collusion || !levelRules(this.state).collusion) return false;
+    const e = this.entry(id); const p = playerById(this.state, id);
+    if (!e || e.isStore || !p || !p.isHuman || e.role === ROLE.OUT) return false;
+    const M = AuctionEngine.collusionMs();
+    if (this.lastPress[id] !== undefined && this.clock - this.lastPress[id] < M.cooldown) return false;
+    this.lastPress[id] = this.clock;
+    this.presses = this.presses.filter((x) => x.id !== id && this.clock - x.at <= M.window).concat([{ id, at: this.clock }]);
+    const roles = this.presses.map((x) => this.entry(x.id).role);
+    if (this.presses.length >= 2 && roles.includes(ROLE.BUYER) && roles.includes(ROLE.SELLER)) {
+      // [Atari code] the main timer is saved; "COLLUSION" flashes first (stage 'flash'), then the colluders trade ('active').
+      const C = CONFIG.AUCTION.collusion;
+      this.collusion = { members: this.presses.map((x) => x.id).sort(), stage: 'flash', ms: 0, units: C.units, unitsTotal: C.units, saved: this.units };
+      this.presses = []; this.contact = AuctionEngine.noContact();
+    }
+    return true;
+  }
+  /** The collusion's flash / end messages: no trading and no timer meanwhile; then the main timer resumes from its saved value. */
+  _collusionPause(dt) {
+    const c = this.collusion; const M = AuctionEngine.collusionMs(); c.ms += dt;
+    if (c.stage === 'flash' && c.ms >= M.flash) { c.stage = 'active'; c.ms = 0; }
+    else if (c.stage === 'over' && c.ms >= M.over) { this.units = c.saved; this.collusion = null; }
   }
   priceCap(e) { return !e || e.isStore ? this.market.maxPrice : this.playerMax(); }
   canDeclare() { return !this.ended && this.stage === 'declare'; }
@@ -116,14 +155,16 @@ class AuctionEngine {
     let lo = this.market.minPrice; let hi = this.priceCap(e);
     if (!e.isStore && e.role !== ROLE.OUT) {
       const opp = e.role === ROLE.BUYER ? ROLE.SELLER : ROLE.BUYER;
-      this.entries.filter((o) => o.ownerId !== e.ownerId && o.role === opp && this._active(o)).forEach((o) => {
+      this.entries.filter((o) => o.ownerId !== e.ownerId && o.role === opp && this.inPlay(o) && this._active(o)).forEach((o) => {
         if (e.role === ROLE.BUYER) hi = Math.min(hi, o.price); else lo = Math.max(lo, o.price);
       });
     }
     return { lo, hi: Math.max(lo, hi) };
   }
   setPrice(id, price) {
-    const e = this.entry(id); const b = this._bounds(e); const s = this.market.step;
+    const e = this.entry(id);
+    if (!this.inPlay(e) && !e.isStore) return; // frozen by a collusion
+    const b = this._bounds(e); const s = this.market.step;
     e.priceF = clamp(price, b.lo, b.hi);
     e.price = clamp(Math.round(e.priceF / s) * s, b.lo, b.hi);
   }
@@ -162,8 +203,8 @@ class AuctionEngine {
   }
   /** First touching pair (buyer line at or above the seller line) whose trade is allowed; a blocked touching pair posts a notice. */
   _findPair() {
-    const buyers = this._order(this.entries.filter((e) => e.role === ROLE.BUYER), -1);
-    const sellers = this._order(this.entries.filter((e) => e.role === ROLE.SELLER), 1);
+    const buyers = this._order(this.entries.filter((e) => e.role === ROLE.BUYER && this.inPlay(e)), -1);
+    const sellers = this._order(this.entries.filter((e) => e.role === ROLE.SELLER && this.inPlay(e)), 1);
     for (const b of buyers) {
       for (const s of sellers) {
         if (b.ownerId === s.ownerId || b.price < s.price) continue;
@@ -227,6 +268,7 @@ class AuctionEngine {
       this.stage = 'trade'; this.units = this.unitsTotal = CONFIG.AUCTION.tradeUnits;
       if (dt <= 0) return;
     }
+    if (this.collusion && this.collusion.stage !== 'active') { this.clock += dt; this._collusionPause(dt); return; }
     this.clock += dt; this.t += dt;
     if (this.withStore) this._updateStore();
     const pair = this._findPair();
@@ -241,8 +283,14 @@ class AuctionEngine {
       }
     } else if (this.contact.key) this.contact = AuctionEngine.noContact();
     const tick = pair ? this.timing.contact : this.pushMs > 0 ? this.timing.push : this.timing.idle;
-    this.units = Math.max(0, this.units - dt / tick);
     this.pushMs = Math.max(0, this.pushMs - dt);
+    if (this.collusion) {
+      // [Atari code] the separate collusion timer runs at the same tick as the main one; at 0: "COLLUSION IS OVER" (stage 'over').
+      const c = this.collusion; c.units = Math.max(0, c.units - dt / tick);
+      if (c.units <= 0) { c.stage = 'over'; c.ms = 0; this.contact = AuctionEngine.noContact(); }
+      return;
+    }
+    this.units = Math.max(0, this.units - dt / tick);
     this.allOutMs = this.colonistEntries.every((e) => e.role === ROLE.OUT) ? this.allOutMs + dt : 0;
     this.noOpMs = this._possible() ? 0 : this.noOpMs + dt;
     if (this.units <= 0) this._end('time');

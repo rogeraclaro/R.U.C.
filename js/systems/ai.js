@@ -34,9 +34,11 @@ const AISystem = {
    * line that touches keeps trading). Prices drift from an optimistic start toward the store's price as the trade time runs out.
    * Not from the original ([Atari code]: the auction AI is undocumented); the engine enforces the critical level on its own.
    */
-  decide(state, rng, p, engine) {
+  decide(state, rng, p, engine, brain = null) {
     const def = engine.market; const res = def.id;
+    if (res === 'crystite') return this.decideCrystite(state, rng, p, engine);
     const prof = this.profile(p); const d = this.diff(state);
+    const smart = levelRules(state).smartAi && (res === 'food' || res === 'energy'); const T = CONFIG.AI_TOURNAMENT;
     const inv = p.inventory[res] || 0; const reserve = this.reserve(state, p, res);
     const central = StoreSystem.price(state, def);
     const err = (rng.next() * 2 - 1) * d.valuationErr / 100;
@@ -51,7 +53,14 @@ const AISystem = {
       const start = val * (1 + margin / 100);
       let floor = storeBid;
       if (p.aiProfile === 'industrial' && res === 'smithore') floor = Math.max(storeBid, val * 0.9);
-      return { role: ROLE.SELLER, target: cap(start - (start - floor) * progress), limit: reserve };
+      let limit = reserve;
+      // [Atari code] Tournament: a small surplus is held back (only rand(0..surplus) is sold), drawn once per auction (kept in the brain).
+      const surplus = inv - reserve; const H = T.holdBack;
+      if (smart && surplus < H[res] && central <= H.maxPrice && cash >= H.cash) {
+        if (brain && brain.holdBack !== undefined) limit = brain.holdBack;
+        else { limit = inv - rng.int(surplus + 1); if (brain) brain.holdBack = limit; }
+      }
+      return { role: ROLE.SELLER, target: cap(start - (start - floor) * progress), limit };
     }
     const desperate = (res === 'food' && inv < ConsumptionSystem.foodNeed(state.turn + 1) - this.expectedProd(state, p, 'food')) || (res === 'energy' && inv < this.nonEnergyRucs(state, p));
     const speculate = p.aiProfile === 'opportunist' && inv < reserve + 6 && central < def.basePrice * 0.85 && cash > 500 && state.turn < lastRound(state);
@@ -63,7 +72,30 @@ const AISystem = {
       const safety = desperate ? 0 : 120;
       bid = Math.min(bid, cash - safety);
       if (bid < def.minPrice) return { role: ROLE.OUT, target: null, limit: null };
-      return { role: ROLE.BUYER, target: bid, limit: speculate ? reserve + 6 : reserve };
+      let limit = speculate ? reserve + 6 : reserve;
+      // [Atari code] Tournament: with only buyers, buy the store out (its whole stock) if the need is smaller than it and affordable.
+      const stock = state.store.stock[res] || 0;
+      if (smart && state.turn < lastRound(state) && stock <= T.buyOut.maxStock && reserve - inv < stock && storeAsk * stock < cash
+        && !engine.colonistEntries.some((x) => x.role === ROLE.SELLER)) limit = inv + stock;
+      return { role: ROLE.BUYER, target: bid, limit };
+    }
+    return { role: ROLE.OUT, target: null, limit: null };
+  },
+  /** Crystite (Tournament): the [Atari code] trading rules of CONFIG.AI_TOURNAMENT.crystite; prices drift as in decide. */
+  decideCrystite(state, rng, p, engine) {
+    const def = engine.market; const K = CONFIG.AI_TOURNAMENT.crystite; const prof = this.profile(p);
+    const inv = p.inventory.crystite || 0; const P = StoreSystem.price(state, def); const cash = p.cash;
+    const val = P * (1 + (rng.next() * 2 - 1) * this.diff(state).valuationErr / 100);
+    const progress = clamp(engine.progress() / 0.7, 0, 1);
+    if (inv > 0) {
+      const sell = P >= K.sellBelow ? inv : Math.min(inv, Math.max(inv - K.keep, Math.ceil(Math.max(0, K.cashGoal - cash) / P)));
+      if (sell <= 0) return { role: ROLE.OUT, target: null, limit: null };
+      const start = val * (1 + prof.margin / 100); const floor = StoreSystem.bid(state, def);
+      return { role: ROLE.SELLER, target: start - (start - floor) * progress, limit: inv - sell };
+    }
+    if (P < K.buyBelow && cash >= K.buyCash) {
+      const n = Math.min(K.maxBuy, Math.floor((cash - K.cashKeep) / P)); const start = val * (1 - prof.margin / 100);
+      return { role: ROLE.BUYER, target: Math.min(start + (P - start) * progress, cash), limit: n };
     }
     return { role: ROLE.OUT, target: null, limit: null };
   },
@@ -75,7 +107,7 @@ const AISystem = {
   tick(state, rng, p, brain, engine, dt) {
     const e = engine.entry(p.id);
     if (engine.clock >= brain.nextDecisionAt) {
-      const d = this.decide(state, rng, p, engine);
+      const d = this.decide(state, rng, p, engine, brain);
       const d0 = this.diff(state);
       brain.nextDecisionAt = engine.clock + Math.max(CONFIG.AUCTION.aiHoldMs, rng.range(d0.reactMin, d0.reactMax));
       if (engine.canDeclare()) { engine.setRole(p.id, d.role); brain.role = d.role; brain.target = d.target; brain.limit = d.limit; }
@@ -125,8 +157,10 @@ const AISystem = {
   turn(state, rng, p) {
     const clock = { units: ConsumptionSystem.turnUnits(state, p) };
     const installs = this.develop(state, rng, p, clock);
+    // [Atari code] Tournament: the assay round comes after the installs and before the pub (CrystiteSystem.aiAssay).
+    const assays = CrystiteSystem.aiAssay(state, rng, p, clock);
     const pub = clock.units >= CONFIG.PUB.pubMinUnits ? PubSystem.visit(state, p.id, clock.units) : 0;
-    return { installs, pub, unitsLeft: clock.units };
+    return { installs, assays, pub, unitsLeft: clock.units };
   },
   /** Units an install costs the computer: [Atari code] 25 + 2 x the plot's distance from the town (plots, |dx| + |dy|). */
   installUnits(plot) { return CONFIG.PUB.aiInstallUnits + CONFIG.PUB.aiDistUnits * (Math.abs(plot.x - CONFIG.RIVER_COL) + Math.abs(plot.y - CONFIG.TOWN_ROW)); },
@@ -145,12 +179,17 @@ const AISystem = {
       const nextNeed = ConsumptionSystem.foodNeed(Math.min(lastRound(state), state.turn + 1));
       const foodOk = p.inventory.food + this.expectedProd(state, p, 'food') >= nextNeed + 1;
       let module = !energyOk ? 'energy' : !foodOk ? 'food' : prof.prefers;
+      // Tournament: a free plot of its own with KNOWN medium / high crystite gets a crystite M.U.L.E. ([Atari code] the computers rate
+      // crystite on known values only; this simple rule is [PROVISIONAL]).
+      const rich = energyOk && foodOk && levelRules(state).crystite ? free.map((q) => ({ q, k: CrystiteSystem.known(state, q.id) }))
+        .filter((x) => x.k !== null && x.k >= 2).sort((a, b) => (b.k - a.k) || (a.q.id - b.q.id))[0] : null;
+      if (rich) module = 'crystite';
       if (module === 'smithore' && !free.some((q) => q.terrain === TERRAIN.MOUNTAIN)) module = 'food';
       const mine = (q) => (x) => x.ownerId === p.id && x.ruc && x.ruc.module === module;
-      const scored = free.map((q) => ({ q, s: ProductionSystem.baseYield(q, module) * 10 + (Plot.neighbours(state.plots, q).some(mine(q)) ? 5 : 0) + rng.next() }));
-      const plot = scored.sort((a, b) => b.s - a.s)[0].q;
+      const plot = rich ? rich.q : free.map((q) => ({ q, s: ProductionSystem.baseYield(q, module) * 10 + (Plot.neighbours(state.plots, q).some(mine(q)) ? 5 : 0) + rng.next() }))
+        .sort((a, b) => b.s - a.s)[0].q;
       // The chosen plot may yield nothing for that module (e.g. smithore on the river): fall back to what it does yield.
-      if (!ProductionSystem.canProduce(plot, module) || ProductionSystem.baseYield(plot, module) === 0) {
+      if (!rich && (!ProductionSystem.canProduce(plot, module) || ProductionSystem.baseYield(plot, module) === 0)) {
         module = ['energy', 'food', 'smithore'].find((m) => ProductionSystem.canProduce(plot, m) && ProductionSystem.baseYield(plot, m) > 0);
       }
       const cost = StoreSystem.rucPrice(state) + CONFIG.MODULE_COST[module];

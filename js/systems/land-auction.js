@@ -8,12 +8,14 @@
  */
 const LandAuction = {
   /**
-   * [Atari code] colony plots this round: Normal(1, amplitude 1) -> 0: 16.2 %, 1: 67.7 %, 2: 16.1 %, 3: 0.1 % (the production
-   * variation draw, binomialStep with F = 0.5), capped by the free plots. None in Beginner or with the feature off.
+   * [Atari code] colony plots this round: Standard Normal(1, amplitude 1) -> 0: 16.2 %, 1: 67.7 %, 2: 16.1 %, 3: 0.1 % (the production
+   * variation draw, binomialStep with F = 0.5); Tournament amplitude 2 (F = 1) -> 0..5: 31.1 / 37.7 / 24.3 / 6.2 / 0.6 / 0.01 %.
+   * Capped by the free plots. None in Beginner or with the feature off.
    */
   colonyCount(state, rng) {
-    if (!FEATURES.landAuctions || !levelRules(state).landAuctions) return 0;
-    const n = clamp(1 + binomialStep(rng, CONFIG.PRODUCTION.varAmp), 0, CONFIG.LAND_AUCTION.maxLots);
+    const r = levelRules(state);
+    if (!FEATURES.landAuctions || !r.landAuctions) return 0;
+    const n = clamp(1 + binomialStep(rng, r.landAuctionAmp), 0, r.landAuctionMax);
     return Math.min(n, LandGrantSystem.freePlots(state).length);
   },
   /** `aiIds`: colonists driven by the computer. `opts.colony` forces the number of colony plots (tests); `opts.fast` shortens the cards. */

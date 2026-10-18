@@ -1,6 +1,8 @@
 'use strict';
 const ProductionSystem = {
+  /** [manual] terrain table; crystite: [Atari code] the plot's deposit level 0..4 (calcPlotProdWithEcos, EBPC). */
   baseYield(plot, res) {
+    if (res === 'crystite') return Math.max(0, plot.hiddenDeposit || 0);
     const row = PRODUCTION_TABLE[plot.terrain];
     const cell = row && (row[plot.richness] || row[0]);
     return cell ? (cell[res] || 0) : 0;
@@ -21,8 +23,12 @@ const ProductionSystem = {
    * [Atari code] random variation: units = mean + round(F x binomial), Standard F = 0.5 -> -1/0/+1 at ~16/68/16 %, +-2 at ~0.1 % each
    * (see binomialStep). One seeded draw per plot; the result is then clamped to 0..8.
    */
-  /** Level amplitude ([Atari code] Beginner 0: no draw at all, so the PRNG stream is not used). */
-  variation(state, rng) { const F = levelRules(state).varAmp; return F ? binomialStep(rng, F) : 0; },
+  /** Level amplitude ([Atari code] Beginner 0: no draw at all, so the PRNG stream is not used; Tournament F = 1, at most +-4). */
+  variation(state, rng) {
+    const r = levelRules(state); if (!r.varAmp) return 0;
+    const v = binomialStep(rng, r.varAmp);
+    return r.varMax ? clamp(v, -r.varMax, r.varMax) : v;
+  },
   clampUnits(u) { return clamp(u, CONFIG.PRODUCTION.min, CONFIG.PRODUCTION.max); },
   /**
    * [Atari code] "before production" planetary events change each plot's final production (after variation and the 0..8 clamp):

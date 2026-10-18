@@ -4,10 +4,16 @@ const StoreSystem = {
   rucPrice(state) { const ps = this.price(state, RESOURCE_DEFS.smithore); return (ps - ps % 5) * 2; },
   /** The store's price P of a good (state.storePrice); a market the state does not track (tests, Phase B) uses its basePrice. */
   price(state, def) { const v = state.storePrice && state.storePrice[def.id]; return v === undefined ? def.basePrice : v; },
-  /** [Atari code][C64] store buy line: food / energy P - 15, smithore P (round 1: 15 / 10 / 50). */
-  bid(state, def) { return clamp(this.price(state, def) - (def.storeBuyOff || 0), def.minPrice, def.maxPrice); },
-  /** [Atari code][C64] store sell line: food / energy P + 20, smithore P + 35 (round 1: 50 / 45 / 85). */
-  ask(state, def) { return clamp(this.price(state, def) + (def.storeSellOff || 0), def.minPrice, def.maxPrice); },
+  /** [Atari code][C64] store buy line: food / energy P - 15, smithore P (round 1: 15 / 10 / 50); crystite P rounded down to $4. */
+  bid(state, def) {
+    const P = this.price(state, def);
+    return clamp(def.buyRound ? P - P % def.buyRound : P - (def.storeBuyOff || 0), def.minPrice, def.maxPrice);
+  },
+  /** [Atari code][C64] store sell line: food / energy P + 20, smithore P + 35 (round 1: 50 / 45 / 85); crystite its buy line + 140. */
+  ask(state, def) {
+    const base = def.buyRound ? this.bid(state, def) : this.price(state, def);
+    return clamp(base + (def.storeSellOff || 0), def.minPrice, def.maxPrice);
+  },
   /**
    * [Atari code] calcGoodPriceSupplyDemand: P x (0.25 + 0.75 x demand / supply). The ratio is 3-bit fixed point (quantised down to
    * 1/8), a supply of 0 counts as 1, and only smithore clamps the ratio to [0.25, 3]. Integer form: floor(P x (16 + 6q) / 64), q = 8 x ratio.
@@ -52,7 +58,9 @@ const StoreSystem = {
     // [Atari code] Beginner: smithore stays at $50 (no supply/demand, no random step).
     const fixed = levelRules(state).smithorePrice;
     P.smithore = fixed || this.limit(defs.smithore, smithore + sp.smithoreStep * clamp(binomialStep(rng, 1), -sp.smithoreStepMax, sp.smithoreStepMax));
-    return { food: P.food, energy: P.energy, smithore: P.smithore };
+    // [Atari code] Tournament: crystite is re-drawn for the next round (drawn only there, so the other levels keep their PRNG stream).
+    if (levelRules(state).crystite) CrystiteSystem.drawPrice(state, rng);
+    return { food: P.food, energy: P.energy, smithore: P.smithore, crystite: P.crystite };
   },
   buyRuc(state, playerId) {
     const price = this.rucPrice(state);
