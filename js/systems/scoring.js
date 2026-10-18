@@ -34,6 +34,8 @@ const ScoringSystem = {
     }
     return null;
   },
+  /** [Atari code] calcAndDrawScore: round((colony total - 10000) / 20000), clamped to 0..6 (index into COLONY_RATINGS). */
+  rating(total) { const R = CONFIG.RATING; return clamp(Math.round((total - R.offset) / R.step), 0, R.max); },
   /** [manual] Standard: the colony succeeds with a combined net worth of at least $60,000. There is no per-colonist minimum. */
   survival(state) {
     const combined = state.players.reduce((s, p) => s + this.netWorth(state, p), 0);

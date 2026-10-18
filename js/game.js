@@ -7,7 +7,7 @@ class Game {
     this.persist = true; // false in self-tests: a simulated game must never overwrite the player's save
     this.state = null; this.rng = null; this.rt = {}; this.turns = new TurnSystem();
     this.settings = this.loadSettings();
-    this.setup = { name: 'Roger', color: 'yellow', difficulty: 'colony', seed: this.randomSeed() };
+    this.setup = { name: 'Roger', color: 'yellow', level: 'standard', species: 'mechtron', seed: this.randomSeed() };
     this.renderer = new Renderer(canvas, this); this.input = new InputManager(canvas, this); this.audio = new AudioManager(this);
     const map = new MapScreen();
     this.screens = { title: new TitleScreen(), setup: new SetupScreen(), map, production: new ProductionScreen(map), report: new ReportScreen(), auction: new AuctionScreen(), gameover: new GameOverScreen() };
@@ -73,7 +73,7 @@ class Game {
   }
   newGame(opts) {
     const seed = (opts.seed && String(opts.seed).trim()) || this.randomSeed();
-    const { state, rng } = GameState.create({ seed, difficulty: opts.difficulty, playerName: (opts.playerName || 'Roger').trim() || 'Roger', colorId: opts.colorId });
+    const { state, rng } = GameState.create({ seed, level: opts.level, species: opts.species, playerName: (opts.playerName || 'Roger').trim() || 'Roger', colorId: opts.colorId });
     this.state = state; this.rng = rng; this.rt = {}; this.paused = false; this.helpOpen = false; this.mode = 'play';
     state.createdAt = Date.now();
     this.turns.enter(this, 'TURN_START');
@@ -109,13 +109,15 @@ class Game {
     SaveSystem.save(this.state, this.rng);
   }
   /**
-   * [manual] the colony must reach 60,000; only then is the leader the First Founder. The ranking is shown either way.
+   * [Atari code] colony rating 0..6 (ScoringSystem.rating); the leader is the First Founder only when the ship is back (last round)
+   * and the rating is at least 3 (a colony of $60,000, [manual]). The ranking is shown either way.
    * `lack` ('food' / 'energy'): [Atari code] the colony failed early for a total lack of that good (ScoringSystem.colonyFailure).
    */
   finish(lack = null) {
     const s = this.state; const surv = ScoringSystem.survival(s); const rank = ScoringSystem.ranking(s, this.rng);
-    const survives = surv.survives && !lack;
-    s.final = { survives, combined: surv.combined, winnerId: survives ? rank[0].p.id : null, lack, rank: rank.map((x) => ({ id: x.p.id, b: x.b })) };
+    const rating = ScoringSystem.rating(surv.combined);
+    const founder = !lack && s.turn >= lastRound(s) && rating >= CONFIG.RATING.founderMin;
+    s.final = { survives: surv.survives && !lack, rating, combined: surv.combined, winnerId: founder ? rank[0].p.id : null, lack, rank: rank.map((x) => ({ id: x.p.id, b: x.b })) };
     s.phase = 'GAME_OVER'; this.turns.phase = null; this.setScreen('gameover'); this.save();
   }
 
@@ -170,10 +172,9 @@ class Game {
   }
 
   /* ---- what the HUD/instruction line shows ---- */
-  /** { left, total } for the HUD's shrinking time bar, or null when nothing is timed right now. */
+  /** { left, total } for the HUD's shrinking time bar (auctions), or null. Development uses the vertical bar on the map (MapScreen.timeBar). */
   hudTimer() {
     const ph = this.turns.phase;
-    if (ph === 'DEVELOPMENT') { const w = this.humanWalk(); return w ? { left: w.timeLeft, total: w.timeTotal } : null; }
     if (ph && ph.startsWith('AUCTION_') && this.rt.auction) {
       const e = this.rt.auction.engine;
       return e.canDeclare() ? { left: e.declareLeft, total: CONFIG.AUCTION.declareMs } : { left: Math.max(0, CONFIG.AUCTION.maxMs - e.t), total: CONFIG.AUCTION.maxMs };
@@ -200,12 +201,13 @@ class Game {
       const slot = this.devSlot(); if (!slot) return '';
       const w = this.humanWalk();
       if (w) {
-        if (!w.carrying) return w.area === 'town' ? 'Entra al corral per comprar un RUC, o surt a retirar-ne un d\'instal·lat.' : 'Torna al poble per un RUC, o retira\'n un de la casa d\'una parcel·la teva.';
+        if (w.marking && !w.carrying) return w.markPlot === null ? 'Oficina de terres: prem Acció sobre una parcel·la teva per marcar-la i torna a l\'oficina.' : `Parcel·la #${w.markPlot + 1} marcada: torna a l'oficina de terres per posar-la a la venda.`;
+        if (!w.carrying) return w.area === 'town' ? 'Compra un RUC al corral, o ves al pub a acabar el torn.' : 'Torna al poble per un RUC, o retira\'n un de la casa d\'una parcel·la teva.';
         if (!w.carrying.module) return w.area === 'town' ? 'Entra a un taller per equipar el RUC.' : 'Torna al poble: el RUC s\'ha d\'equipar a un taller.';
         return w.area === 'town' ? 'Surt del poble i porta el RUC a la casa d\'una parcel·la teva.' : 'Posa\'t sobre la casa d\'una parcel·la teva i prem Acció.';
       }
-      if (slot.stage === 'countdown') return 'Prepara\'t: el teu torn comença de seguida.';
-      return slot.stage === 'card' ? 'Esdeveniment individual' : `Desenvolupament: torn de ${playerById(this.state, slot.pid).name}`;
+      if (slot.stage === 'ready') return 'Prem el botó per començar (Acció, Enter, Espai o clic).';
+      return `Desenvolupament: torn de ${playerById(this.state, slot.pid).name}`;
     }
     if (ph === 'PLANET_EVENT') return 'Esdeveniment planetari abans de la producció';
     if (ph === 'PLANET_EVENT_AFTER') return 'Esdeveniment planetari després de la producció';
@@ -224,7 +226,11 @@ class Game {
   /** The colonist's action button. There is deliberately no way to pick a plot, buy or outfit from a panel. */
   devAction() { const w = this.humanWalk(); if (w && !this.paused && !this.helpOpen) DevWalk.act(this.state, w); }
   devFinish() { const w = this.humanWalk(); if (w && !this.paused) DevWalk.end(this.state, w, 'done'); }
-  devSkipCard() { const s = this.devSlot(); if (s && s.stage === 'card') s.timer = 0; }
+  /** [C64] "PRESS YOUR STICK BUTTON TO START": the human's walk and its clock start only now. */
+  devStart() {
+    const s = this.devSlot(); if (!s || s.stage !== 'ready' || this.paused || this.helpOpen) return;
+    s.stage = 'walk'; s.walk = DevWalk.create(this.state, s.pid, ConsumptionSystem.humanTimeMs(this.state, playerById(this.state, s.pid)));
+  }
   devFeedback(w) {
     const kind = w.log[w.log.length - 1];
     this.audio.play(w.bad ? 'error' : kind === 'install' ? 'phase' : 'click');
@@ -241,14 +247,15 @@ class Game {
     if (ev) { s.event.items.push(ev); this.audio.play('event'); }
     const slot = { pid, event: ev, stage: 'show', timer: 0, log: [], walk: null };
     if (p.isHuman && !this.autopilot) {
-      // The walk itself (and its clock) is only created once the "get ready" countdown ends — see updateDevelopment.
-      slot.stage = ev ? 'card' : 'countdown'; slot.timer = ev ? 6000 : CONFIG.DEV.countdownMs;
-      this.announce(ev ? ev.text : `Prepara't: el teu torn de desenvolupament comença en ${Math.ceil(CONFIG.DEV.countdownMs / 1000)} s.`);
+      // [C64] the personal event (if any) is shown first, then "press the button to start"; the walk is created by devStart.
+      slot.stage = 'ready';
+      this.announce(`${ev ? `${ev.text} ` : ''}Prem el botó per començar.`);
     } else {
       if (ev) slot.log.push(`${p.name}: ${ev.text}`);
-      const acts = AISystem.develop(s, this.rng, p);
-      acts.forEach((a) => slot.log.push(`${p.name}: RUC de ${resLabel(a.module).toLowerCase()} a la parcel·la ${a.plotId + 1}`));
-      if (!acts.length) slot.log.push(`${p.name} no instal·la cap RUC aquest torn.`);
+      const turn = AISystem.turn(s, this.rng, p);
+      turn.installs.forEach((a) => slot.log.push(`${p.name}: RUC de ${resLabel(a.module).toLowerCase()} a la parcel·la ${a.plotId + 1}`));
+      if (!turn.installs.length) slot.log.push(`${p.name} no instal·la cap RUC aquest torn.`);
+      if (turn.pub) slot.log.push(`${p.name} va al pub i guanya ${turn.pub} cr jugant.`);
       slot.timer = this.fast(ev ? 2600 : 1400);
       this.announce(slot.log.join(' '));
     }
@@ -257,17 +264,15 @@ class Game {
   updateDevelopment(dt) {
     const dev = this.turns.phaseData.dev; const slot = dev.slot;
     if (!slot) { this.startDevSlot(); return; }
-    if (slot.stage === 'card') { slot.timer -= dt; if (slot.timer <= 0) { slot.stage = 'countdown'; slot.timer = CONFIG.DEV.countdownMs; } return; }
-    if (slot.stage === 'countdown') {
-      slot.timer -= dt;
-      if (slot.timer <= 0) { slot.stage = 'walk'; slot.walk = DevWalk.create(this.state, slot.pid, ConsumptionSystem.humanTimeMs(this.state, playerById(this.state, slot.pid))); }
-      return;
-    }
+    if (slot.stage === 'ready') return; // waits for the button (devStart)
     if (slot.stage === 'walk') {
       const w = slot.walk;
       DevWalk.update(this.state, w, this.devDirs(), dt);
       if (w.seq !== this.rt.walkSeq) { this.rt.walkSeq = w.seq; this.devFeedback(w); }
-      if (w.ended) { slot.stage = 'show'; slot.timer = 1500; slot.log = [w.ended === 'timeout' ? 'S\'ha acabat el temps de desenvolupament.' : 'Has acabat el torn.', w.msg].filter(Boolean); }
+      if (w.ended) {
+        const why = w.ended === 'timeout' ? 'S\'ha acabat el temps de desenvolupament.' : w.ended === 'pub' ? 'Has anat al pub: el torn s\'acaba.' : 'Has acabat el torn.';
+        slot.stage = 'show'; slot.timer = w.ended === 'pub' ? 2500 : 1500; slot.log = [why, w.msg].filter(Boolean);
+      }
       return;
     }
     slot.timer -= dt;
@@ -352,7 +357,15 @@ class Game {
   defineTurnPhases() {
     const timed = (g, dt, ts) => { ts.phaseData.timer -= dt; if (ts.phaseData.timer <= 0) ts.canAdvance = true; };
     const defs = [
-      { id: 'TURN_START', label: 'Inici de torn', enter: (g, ts) => { const s = g.state; s.turn += 1; s.modifiers = GameState.freshModifiers(); s.event = { items: [] }; EventSystem.rankPlayers(s, g.rng); g.rt = {}; g.setScreen('map'); ts.canAdvance = true; } },
+      {
+        // [C64] round 1 opens with the landing: "Aterreu al planeta Irata." / "La nau tornarà d'aquí a N mesos." (a skippable card).
+        id: 'TURN_START', label: 'Inici de torn',
+        enter: (g, ts) => {
+          const s = g.state; s.turn += 1; s.modifiers = GameState.freshModifiers(); s.event = { items: [] }; EventSystem.rankPlayers(s, g.rng); g.rt = {};
+          if (s.turn === 1) g.showPlanetCard(ts, EventSystem.landing(s)); else { g.setScreen('map'); ts.canAdvance = true; }
+        },
+        update: timed
+      },
       {
         id: 'LAND_GRANT', label: 'Adjudicació de terra', save: true, resumable: true,
         enter: (g, ts) => {
@@ -389,7 +402,7 @@ class Game {
         id: 'PLANET_EVENT', label: 'Esdeveniment planetari', save: true,
         enter: (g, ts) => {
           const s = g.state; let rec = null;
-          if (s.turn >= CONFIG.TURNS) rec = EventSystem.shipBack();
+          if (s.turn >= lastRound(s)) rec = EventSystem.shipBack();
           else {
             const fi = g.debugForced.findIndex((id) => EVENT_DEFS[id] && EVENT_DEFS[id].scope === 'planet');
             const id = fi >= 0 ? g.debugForced.splice(fi, 1)[0] : EventSystem.drawPlanet(s, g.rng);
@@ -444,7 +457,7 @@ class Game {
       { id: 'AUTOSAVE', label: 'Desat', enter: (g, ts) => { g.save(); ts.canAdvance = true; } },
       {
         id: 'NEXT', label: 'Següent / final',
-        enter: (g, ts) => { const lack = ScoringSystem.colonyFailure(g.state); if (lack || g.state.turn >= CONFIG.TURNS) g.finish(lack); else ts.canAdvance = true; }
+        enter: (g, ts) => { const lack = ScoringSystem.colonyFailure(g.state); if (lack || g.state.turn >= lastRound(g.state)) g.finish(lack); else ts.canAdvance = true; }
       }
     );
     this.turns.define(defs);
@@ -499,7 +512,7 @@ class Game {
   const assets = new AssetLoader();
   const game = new Game(canvas, assets);
   game.debug = params.get('debug') === '1';
-  window.RUC = { game, assets, runSelfTests, CONFIG, FEATURES, AuctionEngine, ResourceLedger, RucAudit, ScoringSystem, SaveSystem, GameState, AISystem, SettlementSystem, EventSystem, DevWalk };
+  window.RUC = { game, assets, runSelfTests, CONFIG, FEATURES, AuctionEngine, ResourceLedger, RucAudit, ScoringSystem, SaveSystem, GameState, AISystem, SettlementSystem, EventSystem, DevWalk, PubSystem, LandOffice };
   if (params.get('test') === '1') {
     game.mode = 'test'; game.testResults = runSelfTests(); window.__testResults = game.testResults;
     console.log(`SELFTESTS ${game.testResults.passed}/${game.testResults.total}`);
@@ -510,6 +523,6 @@ class Game {
   game.start();
   assets.load().then(() => {
     game.mode = 'title'; game.setScreen('title'); canvas.focus();
-    if (params.get('autoplay') === '1') { game.autopilot = true; game.newGame({ seed: game.setup.seed, difficulty: params.get('difficulty') || 'colony', playerName: 'Roger', colorId: 'yellow' }); }
+    if (params.get('autoplay') === '1') { game.autopilot = true; game.newGame({ seed: game.setup.seed, level: params.get('level') || 'standard', playerName: 'Roger', colorId: 'yellow' }); }
   });
 }());

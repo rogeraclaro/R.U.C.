@@ -2,7 +2,8 @@
 /** AI: sees only public state (prices, stock, markers) and its own inventory. Never the seed or future events. */
 const AISystem = {
   profile(p) { return AI_PROFILES[p.aiProfile] || AI_PROFILES.conservative; },
-  diff(state) { return CONFIG.DIFFICULTY[state.difficulty]; },
+  /** One AI level for every game (CONFIG.AI): the original has no computer-strength setting. */
+  diff() { return CONFIG.AI; },
   rucCount(state, p) { return state.plots.filter((q) => q.ownerId === p.id && q.ruc).length; },
   nonEnergyRucs(state, p) { return state.plots.filter((q) => q.ownerId === p.id && q.ruc && q.ruc.module !== 'energy').length; },
   expectedProd(state, p, res) {
@@ -10,7 +11,7 @@ const AISystem = {
   },
   /** Units worth keeping for next turn. Turn 12 is the last one: nothing left to protect, so sell everything. */
   reserve(state, p, res) {
-    if (state.turn >= CONFIG.TURNS) return 0;
+    if (state.turn >= lastRound(state)) return 0;
     const min = this.diff(state).minReserve; const prof = this.profile(p);
     if (res === 'food') {
       const need = Math.max(0, ConsumptionSystem.foodNeed(state.turn + 1) - this.expectedProd(state, p, 'food'));
@@ -22,7 +23,7 @@ const AISystem = {
   },
   /** The role a colonist starts the declaration with: [manual] "If you have a surplus ... your character will automatically jump to SELL". */
   defaultRole(state, p, res) {
-    const critical = res === 'food' ? ConsumptionSystem.foodNeed(Math.min(CONFIG.TURNS, state.turn + 1)) : res === 'energy' ? this.nonEnergyRucs(state, p) + 1 : 0;
+    const critical = res === 'food' ? ConsumptionSystem.foodNeed(Math.min(lastRound(state), state.turn + 1)) : res === 'energy' ? this.nonEnergyRucs(state, p) + 1 : 0;
     return (p.inventory[res] || 0) > critical ? ROLE.SELLER : ROLE.BUYER;
   },
   createBrain(state, rng, p) {
@@ -50,7 +51,7 @@ const AISystem = {
       return { role: ROLE.SELLER, target: cap(start - (start - floor) * progress) };
     }
     const desperate = (res === 'food' && inv < ConsumptionSystem.foodNeed(state.turn + 1) - this.expectedProd(state, p, 'food')) || (res === 'energy' && inv < this.nonEnergyRucs(state, p));
-    const speculate = p.aiProfile === 'opportunist' && inv < reserve + 6 && central < def.basePrice * 0.85 && cash > 500 && state.turn < CONFIG.TURNS;
+    const speculate = p.aiProfile === 'opportunist' && inv < reserve + 6 && central < def.basePrice * 0.85 && cash > 500 && state.turn < lastRound(state);
     if (inv < reserve || speculate) {
       const start = val * (1 - (speculate ? 10 : prof.margin) / 100);
       // Only starvation / blackout justifies bidding past the store price (up to the store ceiling, never to the UI limit).
@@ -96,17 +97,32 @@ const AISystem = {
    * Development for AI colonists (also used by the autopilot for the human). [manual] the computer players are not shown walking
    * ("they are boring to watch"), so this happens at once, but through the same store rules: robot from the corral, outfit, install.
    */
-  develop(state, rng, p) {
+  /**
+   * [Atari code] a computer's whole development turn: it has the same units as a human (food), installs while at least 35 are left,
+   * each install costing 25 + 2 x distance (plots from the town), then goes to the pub if at least 3 are left. Computers never
+   * catch the Wampus. Returns { installs, pub (cr won, 0 = no visit), unitsLeft }.
+   */
+  turn(state, rng, p) {
+    const clock = { units: ConsumptionSystem.turnUnits(state, p) };
+    const installs = this.develop(state, rng, p, clock);
+    const pub = clock.units >= CONFIG.PUB.pubMinUnits ? PubSystem.visit(state, p.id, clock.units) : 0;
+    return { installs, pub, unitsLeft: clock.units };
+  },
+  /** Units an install costs the computer: [Atari code] 25 + 2 x the plot's distance from the town (plots, |dx| + |dy|). */
+  installUnits(plot) { return CONFIG.PUB.aiInstallUnits + CONFIG.PUB.aiDistUnits * (Math.abs(plot.x - CONFIG.RIVER_COL) + Math.abs(plot.y - CONFIG.TOWN_ROW)); },
+  /** `clock` ({ units }, optional): the turn's development units, spent per install (see turn). */
+  develop(state, rng, p, clock = null) {
     const prof = this.profile(p);
     const reserveCash = { conservative: 320, industrial: 160, opportunist: 220 }[p.aiProfile] || 250;
     const maxInstalls = { conservative: 1, industrial: 2, opportunist: 2 }[p.aiProfile] || 1;
     const actions = [];
     for (let n = 0; n < maxInstalls; n++) {
       const free = state.plots.filter((q) => q.ownerId === p.id && !q.ruc);
-      if (!free.length || state.store.ruc < 1 || state.turn >= CONFIG.TURNS) break;
+      if (!free.length || state.store.ruc < 1 || state.turn >= lastRound(state)) break;
+      if (clock && clock.units < CONFIG.PUB.aiMinUnits) break;
       // Energy RUCs power themselves; every other RUC needs 1 energy from the reserve (plus the new one, plus 1 of margin).
       const energyOk = p.inventory.energy + this.expectedProd(state, p, 'energy') >= this.nonEnergyRucs(state, p) + 2;
-      const nextNeed = ConsumptionSystem.foodNeed(Math.min(CONFIG.TURNS, state.turn + 1));
+      const nextNeed = ConsumptionSystem.foodNeed(Math.min(lastRound(state), state.turn + 1));
       const foodOk = p.inventory.food + this.expectedProd(state, p, 'food') >= nextNeed + 1;
       let module = !energyOk ? 'energy' : !foodOk ? 'food' : prof.prefers;
       if (module === 'smithore' && !free.some((q) => q.terrain === TERRAIN.MOUNTAIN)) module = 'food';
@@ -123,6 +139,7 @@ const AISystem = {
       const m = StoreSystem.buyModule(state, p.id, module);
       if (!m.ok) { StoreSystem.refundRuc(state, p.id, r.price); break; }
       StoreSystem.install(state, p.id, plot.id, { module, paid: r.price });
+      if (clock) clock.units = Math.max(0, clock.units - this.installUnits(plot));
       actions.push({ plotId: plot.id, module });
     }
     return actions;

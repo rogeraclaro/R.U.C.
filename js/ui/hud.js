@@ -19,7 +19,7 @@ const Hud = {
   draw(game, r) {
     const s = game.state; const human = s.players[0];
     r.panel(0, 0, CONFIG.W, 56, { fill: 'rgba(8,11,20,0.94)', frame: false });
-    r.text(`Torn ${Math.min(s.turn, CONFIG.TURNS)}/${CONFIG.TURNS}`, 16, 6, { size: 20 });
+    r.text(`Torn ${Math.min(s.turn, lastRound(s))}/${lastRound(s)}`, 16, 6, { size: 20 });
     const label = game.turns.phase ? game.turns.get(game.turns.phase).label : 'Final';
     r.text(label, 16, 31, { size: 16, color: COL.cyan, maxW: 300 });
     r.text(fmtCr(human.cash), 330, 8, { size: 20, color: COL.amber });

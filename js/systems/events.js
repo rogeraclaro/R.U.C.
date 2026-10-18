@@ -80,6 +80,8 @@ const EventSystem = {
     return null;
   },
   /** [Atari code] round 12 has no colony event: "THE SHIP IS BACK!" instead. */
+  /** [C64] game start: "THE PLANET IRATA." / "THE SHIP WILL BE BACK IN 12 MONTHS." (the level's number of rounds). */
+  landing(state) { return { id: 'landing', scope: 'planet', negative: false, name: 'Aterratge', art: 4, origin: 'c64', targetId: null, text: `Aterreu al planeta Irata. La nau tornarà d'aquí a ${lastRound(state)} mesos.`, params: {} }; },
   shipBack() { return { id: 'ship_back', scope: 'planet', negative: false, name: 'La nau ha tornat!', art: 4, origin: 'c64', targetId: null, text: 'La nau de la Federació aterra: s\'ha acabat el temps.', params: {} }; },
   /** [Atari code] random start plot, then down (wrapping) to the first plot that matches. */
   scanPlots(state, rng, pred) {

@@ -55,7 +55,7 @@ const ResourceLedger = {
 const RucAudit = {
   count(state, carried = 0) {
     const installed = state.plots.filter((p) => p.ruc).length;
-    return { have: state.store.ruc + installed + carried, expected: CONFIG.RUC_START + state.rucs.made - state.rucs.lost };
+    return { have: state.store.ruc + installed + carried, expected: levelRules(state).rucStart + state.rucs.made - state.rucs.lost };
   },
   ok(state, carried = 0) { const c = this.count(state, carried); return c.have === c.expected && state.store.ruc >= 0; }
 };

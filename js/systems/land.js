@@ -34,9 +34,10 @@ const LandGrantSystem = {
  */
 const LandRace = {
   create(state, rng, aiIds) {
-    const d = CONFIG.DIFFICULTY[state.difficulty];
+    // [C64] Standard: 16 frames per plot, [Atari code] 4 cursor steps of pause after a claim (Beginner: 32-frame steps).
+    const frames = levelRules(state).cursorFrames;
     const land = {
-      msPerPlot: d.landMsPerPlot, clock: 0, acc: 0, sweep: 0, cursor: -1, dwellLeft: 0, eligible: [],
+      msPerPlot: framesMs(frames), pauseMs: framesMs(frames * CONFIG.LAND.claimPauseSteps), clock: 0, acc: 0, sweep: 0, cursor: -1, dwellLeft: 0, eligible: [],
       claimed: {}, inputs: [], ai: {}, aiIds: aiIds.slice(), tieOrder: LandGrantSystem.tieOrder(state),
       pause: 0, afterPlot: -1, done: false, hold: CONFIG.LAND.holdMs, lastClaim: null
     };
@@ -69,7 +70,7 @@ const LandRace = {
    * from the seeded PRNG. It never looks at anything a human could not see.
    */
   plan(state, rng, land, pid) {
-    const d = CONFIG.DIFFICULTY[state.difficulty]; const player = playerById(state, pid);
+    const d = CONFIG.AI; const player = playerById(state, pid);
     const reaction = rng.range(d.reactMin, d.reactMax);
     let best = -1; let bestScore = -1e9; let bestRank = 0; let rank = 0;
     for (let id = land.cursor; id < state.plots.length; id++) {
@@ -128,7 +129,7 @@ const LandRace = {
     const waiting = land.eligible.some((id) => land.claimed[id] === undefined);
     const canContinue = waiting && this.nextFree(state, plotId + 1) >= 0;
     if (!canContinue) { this.finish(land); return; }
-    land.afterPlot = plotId; land.pause = CONFIG.LAND.landClaimPauseMs;
+    land.afterPlot = plotId; land.pause = land.pauseMs;
   },
   /** End of the claim pause: the sweep continues at the plot AFTER the claimed one, with a full dwell. */
   resume(state, rng, land) {
@@ -144,4 +145,16 @@ const LandRace = {
   },
   /** [manual] One single sweep: a colonist who did not press in time gets no plot this turn (no second sweep). */
   endSweep(state, rng, land) { this.finish(land); }
+};
+
+/**
+ * Land office ([manual] Standard and Tournament): a colonist marks one of its plots for sale; it is auctioned in the next round's
+ * land auction. Batch 4 implements the auction; here the mark is only stored ({ pid, plotId, turn }, one per colonist) and shown.
+ * A mark on a plot the colonist no longer owns (lost to an event) simply does not count.
+ */
+const LandOffice = {
+  mark(state, pid, plotId) {
+    state.landSales = (state.landSales || []).filter((x) => x.pid !== pid).concat([{ pid, plotId, turn: state.turn }]);
+  },
+  forSale(state) { return (state.landSales || []).filter((x) => { const p = state.plots[x.plotId]; return p && p.ownerId === x.pid; }); }
 };

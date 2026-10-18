@@ -15,9 +15,9 @@ const deepFreeze = (o) => {
  *   [PROVISIONAL]  R.U.C. value, NOT verified for the C64: kept until an emulator capture or binary inspection confirms it.
  */
 const CONFIG = deepFreeze({
-  W: 1280, H: 720, TURNS: 12, COLS: 9, ROWS: 5, RIVER_COL: 4, TOWN_ROW: 2,
+  W: 1280, H: 720, COLS: 9, ROWS: 5, RIVER_COL: 4, TOWN_ROW: 2,
   TILE: 96, MAP_X: 16, MAP_Y: 100,
-  START_CASH: 1000,
+  // Standard values below; CONFIG.LEVELS overrides them per level (see levelRules). Starting cash comes from the species.
   // [Atari code][C64] Standard: every colonist starts with 4 Food and 2 Energy.
   START_INV: { food: 4, energy: 2, smithore: 0 },
   // [Atari code][C64] Standard: the store starts with 8 Food, 8 Energy, 8 Smithore and 14 M.U.L.E.s ([manual] says 16: code wins).
@@ -49,22 +49,29 @@ const CONFIG = deepFreeze({
     aiHoldMs: 1500, aiMoveMs: 110,
     humanStepsPerSec: 9
   },
-  // Land race: the game clock advances in fixed steps so the outcome never depends on the frame rate.
-  // landClaimPauseMs: after every claim the cursor disappears this long (measured on the original: ~2.1 s). Same for all difficulties.
-  LAND: { stepMs: 10, holdMs: 900, landClaimPauseMs: 2000 },
+  // Land race: the game clock advances in fixed steps so the outcome never depends on the frame rate. The cursor speed and the
+  // claim pause depend on the level (CONFIG.LEVELS cursorFrames; [Atari code] the pause is 4 cursor steps).
+  LAND: { stepMs: 10, holdMs: 900, claimPauseSteps: 4 },
   // [Atari code] personal event: roll random[0..79], an event only if < 22 (27.5 %); search down at most 20 candidates;
   // money unit 25 x (floor(round / 4) + 1).
   EVENTS: { personalDie: 80, personalTries: 20, moneyUnit: 25 },
-  // [manual] Standard: the colony must reach $60,000 in total. No per-colonist requirement.
+  // [manual] Standard: the colony must reach $60,000 in total ([Atari code] colony rating >= 3). No per-colonist requirement.
   SURVIVAL: { combined: 60000 },
+  // [Atari code] colony rating = round((total - 10000) / 20000), clamped 0..6 (see COLONY_RATINGS).
+  RATING: { offset: 10000, step: 20000, max: 6, founderMin: 3 },
   // [Atari code] the order is reversed when the corral has 7 M.U.L.E.s or fewer ([manual] says "less than 7": code wins).
-  // unitFrames / palHz: [Atari code] one development time unit = 7 BTU = 28 frames; [C64] PAL runs at 50.125 Hz (101 units ~ 56.4 s).
-  // countdownMs: not C64-sourced — a "get ready" warning shown before the human's development slot starts, so the walk and its
-  // clock never begin while the player is still getting their bearings (see the modal in MapScreen.drawTurnCountdown).
-  DEV: { lowCorral: 7, countdownMs: 3000, unitFrames: 28, palHz: 50.125, baseUnits: 10, foodUnits: 91 },
-  // Walking during development. Speeds/slow terrain [PROVISIONAL], not measured on the C64 yet.
-  // [manual] river and mountains slow you down; diagonal is the fastest way to move (so the two axes are not normalised).
-  // mapSpeed/townSpeed: 2/3 of the original PROVISIONAL values (0.18/0.3), per playtesting feedback, still PROVISIONAL.
+  // unitBtu / btuFrames / palHz: [Atari code] one development time unit = 7 BTU of 4 frames = 28 frames; species and level add or
+  // remove BTU (CONFIG.SPECIES btu, CONFIG.LEVELS extraBtu); [C64] PAL runs at 50.125 Hz (101 units ~ 56.4 s).
+  // [C64] the turn starts when the player presses the button ("PRESS YOUR STICK BUTTON TO START"): there is no countdown.
+  DEV: { lowCorral: 7, unitBtu: 7, btuFrames: 4, palHz: 50.125, baseUnits: 10, foodUnits: 91 },
+  // [Atari code] computer turn: keeps installing while >= aiMinUnits are left; each install costs aiInstallUnits + aiDistUnits x
+  // distance (plots from the town); then the pub if >= pubMinUnits are left.
+  PUB: { pubMinUnits: 3, aiMinUnits: 35, aiInstallUnits: 25, aiDistUnits: 2, cap: 250, overflow: 255 },
+  // Walking during development. [C64] measured: map 0.667 px/frame horizontally and 0.333 vertically (a plot is ~32 x 32 C64 px:
+  // ~48 / ~96 frames to cross it), town 1.33 px/frame horizontally. Scaled by TILE / c64Plot (96 / 32 = 3) to our pixels.
+  // townPxPerFrame.y: [PROVISIONAL] not measured; half the horizontal speed, the same ratio as on the map ([Atari code] town step
+  // 8 px x 4 scanlines). terrainFrames: [Atari code] frames per map step on plain / river / mountain (6 / 14 / 21): the slower
+  // terrain scales the plain speed by 6/14 and 6/21. [manual] diagonal is the fastest way to move (the axes are not normalised).
   // installMs: not C64-sourced — our own pacing so the RUC visibly rises, gets its module and comes back down instead of installing at once.
   // fleeShuffleMs/fleeRunMs: not C64-sourced — our own flee choreography (a quick side-to-side jitter, then a dash off in a random direction).
   // The whole plot tile counts as "the house" (see DevWalk.atHouse), not just a small spot at its centre.
@@ -72,12 +79,48 @@ const CONFIG = deepFreeze({
   // passing by on the street falls short of this and does nothing. visitMs: once committed, the colonist waits right at the
   // doorway while only the RUC walks on to the counter and back (see DevWalk.startVisit / MapScreen.drawVisiting). Neither is
   // C64-sourced.
-  WALK: { stepMs: 10, mapSpeed: 0.12, townSpeed: 0.2, slowPct: 50, doorHoldMs: 350, visitMs: 2200, installMs: 1800, fleeShuffleMs: 400, fleeRunMs: 900 },
-  DIFFICULTY: {
-    relaxed: { label: 'Relaxada', reactMin: 700, reactMax: 1300, valuationErr: 15, minReserve: 2, landMsPerPlot: 500 },
-    colony: { label: 'Colònia', reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3, landMsPerPlot: 400 },
-    ruthless: { label: 'Implacable', reactMin: 180, reactMax: 500, valuationErr: 3, minReserve: 4, landMsPerPlot: 300 }
+  WALK: {
+    stepMs: 10, c64Plot: 32, mapPxPerFrame: { x: 2 / 3, y: 1 / 3 }, townPxPerFrame: { x: 4 / 3, y: 2 / 3 },
+    terrainFrames: { plain: 6, river: 14, mountain: 21 },
+    doorHoldMs: 350, visitMs: 2200, installMs: 1800, fleeShuffleMs: 400, fleeRunMs: 900
   },
+  /*
+   * Game levels ([Atari code] level tables, [C64] title screen F3: BEGINNER / STANDARD / TOURNAMENT). Missing keys = the Standard
+   * values above (see levelRules). cursorFrames: land-grant cursor, frames per plot ([C64] Standard 16; [Atari code] Beginner 8 BTU
+   * = 32). extraBtu: [Atari code] Beginner +2 BTU per development unit. Beginner also: no production variation, smithore fixed at
+   * $50, double store stocks with 25 M.U.L.E.s (smithore 0 and 25 M.U.L.E.s again every round), 8 food / 4 energy to start, no
+   * land selling, and a M.U.L.E. never runs away on a wrong button press. Tournament needs crystite, assay and collusion (Phase B).
+   * Not wired here (Batch 4): Beginner auction timing (ATU 50) and its critical-level block for every seller.
+   */
+  LEVELS: {
+    beginner: {
+      label: 'Principiant', rounds: 6, cursorFrames: 32, extraBtu: 2, varAmp: 0, smithorePrice: 50,
+      startInv: { food: 8, energy: 4, smithore: 0 }, storeStart: { food: 16, energy: 16, smithore: 0 }, rucStart: 25, rucMax: 25,
+      rucReset: true, missFlees: false, landSales: false
+    },
+    standard: { label: 'Estàndard', rounds: 12, cursorFrames: 16 },
+    tournament: { label: 'Torneig', rounds: 12, disabled: true, note: 'cal crystite, Fase B' }
+  },
+  /*
+   * The computer players' reactions (one level: the original has no AI strength setting). These are the former middle "Colònia"
+   * values, kept because they play sensibly: reaction 400-900 ms (land race and auctions), valuation error +-8 %, food / energy
+   * reserve of at least 3. Not from the original code ([Atari code] documents only the grant and install rules, see AISystem).
+   */
+  AI: { reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3 },
+  /*
+   * [Atari code][C64] species: Flapper $1600 and +2 BTU per unit (x9/7 time), Humanoid $600 and -2 BTU (x5/7), the others $1000.
+   * Computers are always Mechtrons. Descriptions are our own short Catalan blurbs (only money and time differ in the rules).
+   */
+  SPECIES: [
+    { id: 'mechtron', label: 'Mechtron', cash: 1000, btu: 0, desc: 'Ésser mecànic, l\'espècie dels rivals de l\'ordinador. 1000 cr, temps normal.' },
+    { id: 'gollumer', label: 'Gollumer', cash: 1000, btu: 0, desc: 'Criatura llefiscosa dels pantans. 1000 cr, temps normal.' },
+    { id: 'packer', label: 'Packer', cash: 1000, btu: 0, desc: 'Acumulador incansable de tot el que troba. 1000 cr, temps normal.' },
+    { id: 'bonzoid', label: 'Bonzoid', cash: 1000, btu: 0, desc: 'Petit, rodanxó i entremaliat. 1000 cr, temps normal.' },
+    { id: 'spheroid', label: 'Spheroid', cash: 1000, btu: 0, desc: 'Una esfera que es mou rodolant. 1000 cr, temps normal.' },
+    { id: 'flapper', label: 'Flapper', cash: 1600, btu: 2, desc: 'Volador lleuger: 1600 cr i més temps de torn (x9/7). Per a principiants.' },
+    { id: 'leggite', label: 'Leggite', cash: 1000, btu: 0, desc: 'Tot cames i cap cervell. 1000 cr, temps normal.' },
+    { id: 'humanoid', label: 'Humanoid', cash: 600, btu: -2, desc: 'Humà: només 600 cr i menys temps de torn (x5/7). Per a experts.' }
+  ],
   PLAYER_COLORS: [
     { id: 'yellow', name: 'Groc', hex: '#f2c94c' }, { id: 'coral', name: 'Corall', hex: '#ff7a6b' },
     { id: 'cyan', name: 'Cian', hex: '#4fd1e6' }, { id: 'violet', name: 'Violeta', hex: '#b58cff' }
@@ -90,8 +133,39 @@ const CONFIG = deepFreeze({
   // The key stays the same so an old (schema 1-2) save is detected and refused with an explicit message.
   // Schema 3: original start stocks, store price P in the state, new food/time/score rules.
   // Schema 4: the 22 original personal events (used flags) and the planetary event bag (state.events).
-  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 4, MAX_DT_MS: 50
+  // Schema 5: game level (state.level replaces difficulty), species, land sales, original land/walk pacing.
+  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 5, MAX_DT_MS: 50
 });
+
+/** The rules of the state's level: CONFIG.LEVELS entry over the Standard defaults. */
+function levelRules(state) {
+  const id = (state && state.level) || 'standard';
+  const L = CONFIG.LEVELS[id] || CONFIG.LEVELS.standard;
+  return {
+    id, label: L.label, rounds: L.rounds, cursorFrames: L.cursorFrames || CONFIG.LEVELS.standard.cursorFrames, extraBtu: L.extraBtu || 0,
+    varAmp: L.varAmp === undefined ? CONFIG.PRODUCTION.varAmp : L.varAmp, smithorePrice: L.smithorePrice || null,
+    startInv: L.startInv || CONFIG.START_INV, storeStart: L.storeStart || CONFIG.STORE_START, rucStart: L.rucStart || CONFIG.RUC_START,
+    rucMax: L.rucMax || CONFIG.RUC_MAX, rucReset: !!L.rucReset, missFlees: L.missFlees !== false, landSales: L.landSales !== false
+  };
+}
+/** The last round of the game (the ship comes back): 12 in Standard, 6 in Beginner. */
+const lastRound = (state) => levelRules(state).rounds;
+/** PAL frames -> ms, rounded to the 10 ms game-clock step. */
+const framesMs = (frames) => Math.round(frames * 1000 / CONFIG.DEV.palHz / 10) * 10;
+const speciesById = (id) => CONFIG.SPECIES.find((x) => x.id === id) || CONFIG.SPECIES[0];
+
+/*
+ * [Atari code] colony rating texts ("OVERALL, THE COLONY ..."), index = rating 0..6, faithful Catalan translations.
+ */
+const COLONY_RATINGS = Object.freeze([
+  'En conjunt, la colònia ha fracassat... estrepitosament. La presó per a deutors de la Federació serà la vostra pròxima llar!',
+  'En conjunt, la colònia ha fracassat... La Federació ja no hi enviarà més naus de comerç. Ara us heu d\'espavilar sols!',
+  'En conjunt, la colònia ha sobreviscut... per poc. Viureu en tendes. Poques naus de comerç passaran per aquí!',
+  'En conjunt, la colònia ha estat un èxit. Heu assolit els mínims fixats per la Federació, però la vida no us serà fàcil!',
+  'En conjunt, la colònia ha triomfat. La Federació està satisfeta dels vostres esforços. Viureu còmodament!',
+  'En conjunt, la colònia ha triomfat... extraordinàriament bé. Ara us podeu retirar en finques elegants!',
+  'En conjunt, la colònia ha encantat la Federació amb el vostre èxit excepcional. La vostra jubilació serà luxosa!'
+]);
 
 /* Mutable on purpose: Phase B modules are wired behind these flags. */
 const FEATURES = { crystite: false, wampus: false, landAuctions: false };

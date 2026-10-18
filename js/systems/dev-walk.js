@@ -1,18 +1,25 @@
 'use strict';
 /**
- * Town interior, in logical px of the map rectangle. [PROVISIONAL] layout (not the C64 geometry): a street across the town, a
- * passage from top to bottom, the three Phase A outfitting shops and the corral. No land office, assay office or pub (see README).
+ * Town interior, in logical px of the map rectangle. [C64] layout: a street across the town between two rows of four buildings —
+ * top row crystite shop (closed: Tournament only, no door), smithore, energy and food shops; bottom row assay office (closed:
+ * Tournament only), land office, pub and the corral. The central passage from top to bottom and the street ends are the exits
+ * (our own walkable geometry; the C64 sizes are not copied). The strip under the bottom row shows "Els teus diners" as the C64.
+ * `kind`: shop / corral (the RUC walks in, see startVisit), pub / land (the colonist goes in), closed (a wall).
  */
 // `spot`: the interior counter a colonist must actually walk up to before a shop/corral visit does anything (see moveTown). It
 // sits well past the doorway, deep inside the room, so a step that only grazes the threshold while walking the street never
 // triggers a purchase by accident — reaching it takes real, visible walking time, both going in and coming back out.
 const TOWN = deepFreeze({
-  W: CONFIG.COLS * CONFIG.TILE, H: CONFIG.ROWS * CONFIG.TILE, streetTop: 170, streetBottom: 310, passX0: 384, passX1: 480,
+  W: CONFIG.COLS * CONFIG.TILE, H: CONFIG.ROWS * CONFIG.TILE, streetTop: 150, streetBottom: 300, passX0: 384, passX1: 480, moneyY: 452,
   buildings: [
-    { id: 'shop_food', kind: 'shop', res: 'food', label: 'Taller de menjar', x: 24, y: 16, w: 170, h: 154, door: 'bottom', spot: { x: 109, y: 66 } },
-    { id: 'shop_energy', kind: 'shop', res: 'energy', label: 'Taller d\'energia', x: 204, y: 16, w: 170, h: 154, door: 'bottom', spot: { x: 289, y: 66 } },
-    { id: 'shop_smithore', kind: 'shop', res: 'smithore', label: 'Taller de smithore', x: 490, y: 16, w: 170, h: 154, door: 'bottom', spot: { x: 575, y: 66 } },
-    { id: 'corral', kind: 'corral', label: 'Corral de RUCs', x: 490, y: 310, w: 350, h: 154, door: 'top', spot: { x: 665, y: 414 } }
+    { id: 'shop_crystite', kind: 'closed', label: 'Crystite', x: 12, y: 10, w: 176, h: 140 },
+    { id: 'shop_smithore', kind: 'shop', res: 'smithore', label: 'Smithore', x: 196, y: 10, w: 176, h: 140, door: 'bottom', spot: { x: 284, y: 60 } },
+    { id: 'shop_energy', kind: 'shop', res: 'energy', label: 'Energia', x: 492, y: 10, w: 176, h: 140, door: 'bottom', spot: { x: 580, y: 60 } },
+    { id: 'shop_food', kind: 'shop', res: 'food', label: 'Menjar', x: 676, y: 10, w: 176, h: 140, door: 'bottom', spot: { x: 764, y: 60 } },
+    { id: 'assay', kind: 'closed', label: 'Assaig', x: 12, y: 300, w: 176, h: 140 },
+    { id: 'land_office', kind: 'land', label: 'Oficina de terres', x: 196, y: 300, w: 176, h: 140, door: 'top', spot: { x: 284, y: 390 } },
+    { id: 'pub', kind: 'pub', label: 'Pub', x: 492, y: 300, w: 176, h: 140, door: 'top', spot: { x: 580, y: 390 } },
+    { id: 'corral', kind: 'corral', label: 'Corral', x: 676, y: 300, w: 176, h: 140, door: 'top', spot: { x: 764, y: 390 } }
   ]
 });
 
@@ -25,13 +32,18 @@ const TOWN = deepFreeze({
  */
 const DevWalk = {
   townTile() { return { x: CONFIG.RIVER_COL * CONFIG.TILE, y: CONFIG.TOWN_ROW * CONFIG.TILE, w: CONFIG.TILE, h: CONFIG.TILE }; },
+  /** `unitMs`: one development unit of this colonist (species and level), for the units left (pub, time bar). */
   create(state, pid, timeMs) {
     return {
       pid, area: 'town', x: (TOWN.passX0 + TOWN.passX1) / 2, y: (TOWN.streetTop + TOWN.streetBottom) / 2,
       carrying: null, latch: null, pressT: 0, visited: false, visiting: null, installing: null, fleeing: null, endWhy: null,
-      timeLeft: timeMs, timeTotal: timeMs, acc: 0, ended: null, msg: '', bad: false, log: [], seq: 0
+      marking: false, markPlot: null, won: 0,
+      timeLeft: timeMs, timeTotal: timeMs, unitMs: ConsumptionSystem.unitMs(state, playerById(state, pid)),
+      acc: 0, ended: null, msg: '', bad: false, log: [], seq: 0
     };
   },
+  /** Whole development units left (the tiny epsilon absorbs the ms rounding of the turn length). */
+  unitsLeft(w) { return Math.max(0, Math.floor(w.timeLeft / w.unitMs + 1e-6)); },
   plotAt(state, x, y) {
     const c = clamp(Math.floor(x / CONFIG.TILE), 0, CONFIG.COLS - 1); const r = clamp(Math.floor(y / CONFIG.TILE), 0, CONFIG.ROWS - 1);
     return state.plots[r * CONFIG.COLS + c];
@@ -43,11 +55,12 @@ const DevWalk = {
   },
   inTownFloor(x, y) { return (y >= TOWN.streetTop && y <= TOWN.streetBottom) || (x >= TOWN.passX0 && x <= TOWN.passX1); },
   buildingAt(x, y) { return TOWN.buildings.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) || null; },
+  /** { x, y } in px per ms: the [C64] px-per-frame speeds scaled to our TILE, river / mountain slower (see CONFIG.WALK). */
   speed(state, w) {
-    if (w.area === 'town') return CONFIG.WALK.townSpeed;
-    const p = this.plotAt(state, w.x, w.y);
-    const slow = p.terrain === TERRAIN.RIVER || p.terrain === TERRAIN.MOUNTAIN;
-    return CONFIG.WALK.mapSpeed * (slow ? CONFIG.WALK.slowPct : 100) / 100;
+    const W = CONFIG.WALK; const k = CONFIG.TILE / W.c64Plot * CONFIG.DEV.palHz / 1000;
+    if (w.area === 'town') return { x: W.townPxPerFrame.x * k, y: W.townPxPerFrame.y * k };
+    const tf = W.terrainFrames; const slow = tf.plain / (tf[this.plotAt(state, w.x, w.y).terrain] || tf.plain);
+    return { x: W.mapPxPerFrame.x * k * slow, y: W.mapPxPerFrame.y * k * slow };
   },
   /**
    * dir: { x, y } with each axis in {-1, 0, 1}. Movement and actions are suspended while `installing` or `fleeing` play out
@@ -67,8 +80,8 @@ const DevWalk = {
     }
   },
   move(state, w, dir) {
-    const d = this.speed(state, w) * CONFIG.WALK.stepMs;
-    const nx = w.x + dir.x * d; const ny = w.y + dir.y * d;
+    const sp = this.speed(state, w);
+    const nx = w.x + dir.x * sp.x * CONFIG.WALK.stepMs; const ny = w.y + dir.y * sp.y * CONFIG.WALK.stepMs;
     // Latch/spot bookkeeping for buildings lives entirely in moveTown now (entering and leaving are both free, gradual movement).
     if (w.area === 'town') this.moveTown(state, w, nx, ny); else this.moveMap(state, w, nx, ny);
   },
@@ -101,7 +114,8 @@ const DevWalk = {
       return;
     }
     const b = this.buildingAt(nx, ny);
-    if (b) {
+    // A closed building has no door: it is a wall (falls through to the sliding below).
+    if (b && b.kind !== 'closed') {
       // The colonist never actually walks in: they stay right at this doorway (their position never adopts nx, ny) and only
       // the RUC itself goes on to the counter, once genuinely pushing into the door for CONFIG.WALK.doorHoldMs has committed
       // to a visit (see startVisit / MapScreen.drawVisiting) — a brief graze while walking the street falls short of that and
@@ -110,7 +124,8 @@ const DevWalk = {
       if (w.latch !== b.id) { w.latch = b.id; w.pressT = 0; w.visited = false; }
       if (w.visited) return;
       w.pressT += CONFIG.WALK.stepMs;
-      if (w.pressT >= CONFIG.WALK.doorHoldMs) { w.visited = true; this.startVisit(state, w, b); }
+      // Shops and the corral: only the RUC goes in (scripted visit). The pub and the land office: the colonist goes in at once.
+      if (w.pressT >= CONFIG.WALK.doorHoldMs) { w.visited = true; if (b.kind === 'pub' || b.kind === 'land') this.enter(state, w, b); else this.startVisit(state, w, b); }
       return;
     }
     if (w.latch) { w.latch = null; w.pressT = 0; w.visited = false; }
@@ -132,6 +147,14 @@ const DevWalk = {
   say(w, msg, bad = false, kind = null) { w.msg = msg; w.bad = bad; w.seq += 1; if (kind) w.log.push(kind); return kind; },
   enter(state, w, b) {
     w.latch = b.id;
+    // [C64] "NO MULES ALLOWED" is in the C64 strings; that it is the pub's and the land office's answer is [PROVISIONAL].
+    if ((b.kind === 'pub' || b.kind === 'land') && w.carrying) return this.say(w, 'No s\'hi admeten RUCs.', true, 'refused');
+    if (b.kind === 'pub') {
+      // [Atari code][C64] the pub ends the development turn and pays (PubSystem) with the units still left.
+      w.won = PubSystem.visit(state, w.pid, this.unitsLeft(w)); w.ended = 'pub';
+      return this.say(w, `Has guanyat ${w.won} cr jugant!`, false, 'pub');
+    }
+    if (b.kind === 'land') return this.landOffice(state, w);
     if (b.kind === 'corral') {
       if (w.carrying) {
         const back = StoreSystem.refundRuc(state, w.pid, w.carrying.paid); const mod = w.carrying.module;
@@ -150,11 +173,28 @@ const DevWalk = {
     w.carrying.module = b.res;
     return this.say(w, `RUC equipat per a ${resLabel(b.res).toLowerCase()}: -${m.price} cr. Porta'l a la casa d'una parcel·la teva.`, false, 'outfit');
   },
+  /**
+   * [manual][C64] land office (Standard): first visit "MARK PLOT TO SELL THEN COME BACK.", then the button over one of your plots
+   * marks it, and back at the office it is "MARKED FOR SALE." for the next land auction (LandOffice; the auction is Batch 4).
+   * [PROVISIONAL] the development clock keeps running meanwhile ([manual]: it stops while you are at the office).
+   */
+  landOffice(state, w) {
+    if (!levelRules(state).landSales) return this.say(w, 'Al nivell Principiant no es ven terra.', true, 'refused');
+    if (!w.marking) { w.marking = true; w.markPlot = null; return this.say(w, 'Marca la parcel·la per vendre i torna.', false, 'office'); }
+    if (w.markPlot === null) return this.say(w, 'Cap parcel·la marcada.', true, 'no_mark');
+    const id = w.markPlot; LandOffice.mark(state, w.pid, id); w.marking = false; w.markPlot = null;
+    return this.say(w, `Parcel·la #${id + 1} marcada per vendre: sortirà a la propera subhasta de terres.`, false, 'for_sale');
+  },
   /** The "joystick button" (Enter / Space / Acció). It only does something on the map; clicks on the map never call it. */
   act(state, w) {
     if (w.ended || w.installing || w.fleeing) return null; // busy: already installing or fleeing
     if (w.area !== 'map') return this.say(w, 'Al poble, entra als edificis caminant-hi.', true);
     const plot = this.plotAt(state, w.x, w.y); const own = plot.ownerId === w.pid; const house = this.atHouse(w, plot);
+    if (!w.carrying && w.marking) {
+      if (!own) return this.say(w, 'No és la teva parcel·la.', true);
+      w.markPlot = plot.id;
+      return this.say(w, `Parcel·la #${plot.id + 1} marcada. Torna a l'oficina de terres.`, false, 'mark');
+    }
     if (!w.carrying) {
       if (house && own && plot.ruc) {
         w.carrying = { module: plot.ruc.module, paid: plot.ruc.paid }; plot.ruc = null;
@@ -170,6 +210,8 @@ const DevWalk = {
       return this.say(w, `Instal·lant el RUC a la parcel·la #${plot.id + 1}...`, false, 'installing');
     }
     // [manual] Standard: pressing the button anywhere but over the house of your own plot makes the M.U.L.E. run away.
+    // [Atari code][manual] Beginner: it only beeps.
+    if (!levelRules(state).missFlees) return this.say(w, 'Aquí no el pots instal·lar: el RUC es queda amb tu.', true, 'beep');
     return this.flee(state, w, 'Has premut fora de la casa d\'una parcel·la teva: el RUC ha fugit!');
   },
   /** Applies the deferred install once the rise/add/descend animation has played (see `act`). */
@@ -199,6 +241,7 @@ const DevWalk = {
   },
   /**
    * End of the colonist's development (time out or voluntary): a RUC still being led runs away ([manual]); nothing is refunded.
+   * Beginner too: the "only beeps" rule is documented for a wrong button press, not for the end of the turn ([PROVISIONAL]).
    * If it was mid-install, that install is completed first (a leftover previous module, if any, flees instead). `w.ended` itself
    * is only set once any flee animation this triggers has played, so the turn queue does not move on before it is shown.
    */

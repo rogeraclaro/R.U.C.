@@ -41,6 +41,12 @@ const terrainName = (p) => ({ river: 'Riu', plain: 'Plana', mountain: 'Muntanya'
 
 class MapScreen {
   constructor() { this.cursor = 20; this.hover = null; }
+  /** [C64] the corral's sign ("$100 MULES"). */
+  static corralSign(state) { return `RUCs ${StoreSystem.rucPrice(state)} cr`; }
+  /** [C64] the line under the town ("YOUR MONEY EQUALS $900"). */
+  static moneyLine(p) { return `Els teus diners: ${p.cash} cr`; }
+  /** [C64] development time bar: vertical, at the right edge of the map, in the player's colour, height = units left. */
+  static timeBar(state, w) { return { units: DevWalk.unitsLeft(w), frac: clamp(w.timeLeft / w.timeTotal, 0, 1), color: playerById(state, w.pid).color }; }
   /**
    * Land race: Enter/Space anywhere is the "buzzer". Development: held arrows walk (polled every tick by Game.devDirs) and Enter/Space
    * is the colonist's action button. A focused panel / HUD button keeps its own Enter/Space.
@@ -56,7 +62,7 @@ class MapScreen {
     }
     if (game.turns.phase === 'DEVELOPMENT') {
       const slot = game.devSlot();
-      if (slot && slot.stage === 'card' && action && !onButton) { game.devSkipCard(); return true; }
+      if (slot && slot.stage === 'ready' && action && (!onButton || f === 'd-start')) { game.devStart(); return true; }
       if (!game.humanWalk()) return false;
       if (e.key.startsWith('Arrow')) return true;
       if (action && !onButton) { game.devAction(); return true; }
@@ -114,6 +120,10 @@ class MapScreen {
         ctx.strokeStyle = RESOURCE_DEFS[p.ruc.module].color; ctx.lineWidth = 2; ctx.strokeRect(x + 60.5, y + 52.5, 31, 31);
         if (fx && fx.draw) fx.draw(ctx, x, y);
       }
+      if (LandOffice.forSale(s).some((x) => x.plotId === p.id)) {
+        r.panel(x + 26, y + 4, T - 30, 20, { fill: 'rgba(6,9,18,0.85)', frame: false });
+        r.text('EN VENDA', x + 26 + (T - 30) / 2, y + 6, { size: 14, color: COL.amber, align: 'center', shadow: false });
+      }
       if (w && p.ownerId === w.pid) {
         // The house: the whole tile counts, not just its centre — being anywhere on your own plot is enough to install/retire a RUC.
         const cx = x + T / 2; const cy = y + T / 2; const on = DevWalk.atHouse(w, p);
@@ -123,9 +133,9 @@ class MapScreen {
       }
     });
   }
-  /** Town interior: drawn in the map rectangle while the colonist is inside the town. */
+  /** Town interior ([C64] layout, see TOWN): drawn in the map rectangle while the colonist is inside the town. */
   drawTown(game, r) {
-    const c = r.ctx; const s = game.state; const X = CONFIG.MAP_X; const Y = CONFIG.MAP_Y;
+    const c = r.ctx; const s = game.state; const X = CONFIG.MAP_X; const Y = CONFIG.MAP_Y; const walk = game.humanWalk();
     c.fillStyle = '#231f2c'; c.fillRect(X, Y, TOWN.W, TOWN.H);
     c.fillStyle = '#4d4557'; c.fillRect(X, Y + TOWN.streetTop, TOWN.W, TOWN.streetBottom - TOWN.streetTop); c.fillRect(X + TOWN.passX0, Y, TOWN.passX1 - TOWN.passX0, TOWN.H);
     r.text('◀ sortida', X + 8, Y + TOWN.streetTop + 8, { size: 16, color: COL.dim });
@@ -133,31 +143,60 @@ class MapScreen {
     r.text('▲ sortida', X + (TOWN.passX0 + TOWN.passX1) / 2, Y + 6, { size: 16, color: COL.dim, align: 'center' });
     r.text('▼ sortida', X + (TOWN.passX0 + TOWN.passX1) / 2, Y + TOWN.H - 24, { size: 16, color: COL.dim, align: 'center' });
     TOWN.buildings.forEach((b) => {
-      const bx = X + b.x; const by = Y + b.y; const color = b.kind === 'corral' ? COL.amber : RESOURCE_DEFS[b.res].color;
+      const bx = X + b.x; const by = Y + b.y; const cx = bx + b.w / 2;
+      if (b.kind === 'closed') {
+        // [C64] a blank building with no door (crystite shop / assay office: Tournament only).
+        r.panel(bx, by, b.w, b.h, { fill: 'rgba(70,62,30,0.9)', border: '#8a7a3a' });
+        r.text(b.label, cx, by + b.h / 2 - 20, { size: 16, color: '#cbbd7a', align: 'center', maxW: b.w - 12 });
+        r.text('tancat', cx, by + b.h / 2 + 4, { size: 14, color: '#a99c66', align: 'center' });
+        return;
+      }
+      const color = b.kind === 'shop' ? RESOURCE_DEFS[b.res].color : b.kind === 'pub' ? '#ff7ab0' : b.kind === 'land' ? COL.good : COL.amber;
       r.panel(bx, by, b.w, b.h, { fill: 'rgba(12,17,31,0.96)', border: color });
       const dy = b.door === 'bottom' ? by + b.h - 8 : by;
-      c.fillStyle = color; c.fillRect(bx + b.w / 2 - 36, dy, 72, 8);
-      r.text(b.label, bx + b.w / 2, by + 10, { size: 16, color, align: 'center', maxW: b.w - 12 });
+      c.fillStyle = color; c.fillRect(cx - 36, dy, 72, 8);
+      const ty = b.door === 'bottom' ? by + 10 : by + 16;
       if (b.kind === 'shop') {
-        r.assetContain(RESOURCE_DEFS[b.res].module, bx + b.w / 2 - 30, by + 36, 60, 60);
-        r.text(`Equip: ${CONFIG.MODULE_COST[b.res]} cr`, bx + b.w / 2, by + 104, { size: 16, align: 'center' });
+        r.text(b.label, cx, ty, { size: 16, color, align: 'center', maxW: b.w - 12 });
+        r.assetContain(RESOURCE_DEFS[b.res].module, cx - 26, by + 32, 52, 52);
+        r.text(`Equip: ${CONFIG.MODULE_COST[b.res]} cr`, cx, by + 92, { size: 16, align: 'center' });
+      } else if (b.kind === 'corral') {
+        r.text(MapScreen.corralSign(s), cx, ty, { size: 18, color, align: 'center', maxW: b.w - 12 });
+        r.assetContain('ruc_idle', bx + 6, by + 50, 56, 56);
+        r.text(`${s.store.ruc} al corral`, cx + 20, by + 114, { size: 14, color: COL.dim, align: 'center' });
+      } else if (b.kind === 'pub') {
+        r.text(b.label, cx, ty, { size: 18, color, align: 'center' });
+        // A mug: our own drawing.
+        c.fillStyle = '#ffcf5a'; c.fillRect(cx - 14, by + 50, 28, 34); c.fillStyle = '#fff'; c.fillRect(cx - 14, by + 44, 28, 9);
+        c.strokeStyle = '#ffcf5a'; c.lineWidth = 4; c.beginPath(); c.arc(cx + 16, by + 66, 8, -Math.PI / 2, Math.PI / 2); c.stroke();
+        r.text('Acaba el torn', cx, by + 98, { size: 14, color: COL.dim, align: 'center', maxW: b.w - 12 });
       } else {
-        r.assetContain('ruc_idle', bx + 16, by + 30, 90, 90);
-        r.text(`${s.store.ruc} RUCs · ${StoreSystem.rucPrice(s)} cr`, bx + 120, by + 48, { size: 18 });
-        r.text('Entra: compra un RUC', bx + 120, by + 78, { size: 16, color: COL.dim, maxW: b.w - 130 });
-        r.text('o retorna el teu', bx + 120, by + 100, { size: 16, color: COL.dim, maxW: b.w - 130 });
+        r.text(b.label, cx, ty, { size: 16, color, align: 'center', maxW: b.w - 12 });
+        c.fillStyle = '#e8ecf5'; c.fillRect(cx - 18, by + 46, 36, 42); c.fillStyle = COL.good;
+        for (let i = 0; i < 4; i++) c.fillRect(cx - 12, by + 54 + i * 8, 24, 3);
+        r.text(levelRules(s).landSales ? 'Ven una parcel·la' : 'Sense vendes', cx, by + 98, { size: 14, color: COL.dim, align: 'center', maxW: b.w - 12 });
       }
       // The counter the RUC walks to: a quiet ring normally, bright and pulsing once you are pushing at the door.
-      const sx = X + b.spot.x; const sy = Y + b.spot.y; const walk = game.humanWalk(); const active = !!(walk && walk.latch === b.id && !walk.visited);
+      if (b.kind !== 'shop' && b.kind !== 'corral') return;
+      const sx = X + b.spot.x; const sy = Y + b.spot.y; const active = !!(walk && walk.latch === b.id && !walk.visited);
       const pulse = active && !game.settings.reduceMotion ? Math.sin(game.now / 150) * 3 : 0;
       c.strokeStyle = active ? '#fff' : 'rgba(255,255,255,0.25)'; c.lineWidth = active ? 3 : 1.5;
       c.beginPath(); c.arc(sx, sy, 17 + pulse, 0, Math.PI * 2); c.stroke();
     });
+    if (walk) r.text(MapScreen.moneyLine(playerById(s, walk.pid)), X + 16, Y + TOWN.moneyY, { size: 18, color: COL.amber });
+  }
+  /** Vertical development time bar at the right edge of the map (see MapScreen.timeBar). */
+  drawTimeBar(game, r, w) {
+    const bar = MapScreen.timeBar(game.state, w); const c = r.ctx;
+    const x = CONFIG.MAP_X + CONFIG.COLS * CONFIG.TILE + 3; const y = CONFIG.MAP_Y; const H = CONFIG.ROWS * CONFIG.TILE; const h = Math.round(H * bar.frac);
+    c.fillStyle = 'rgba(20,28,48,0.9)'; c.fillRect(x, y, 10, H);
+    c.fillStyle = bar.color; c.fillRect(x, y + H - h, 10, h);
+    c.strokeStyle = COL.border; c.lineWidth = 1; c.strokeRect(x + 0.5, y + 0.5, 9, H - 1);
   }
   /** Colonist portrait + identity dot, drawn in place at (X, Y): shared by the normal, installing and fleeing renders. */
   drawColonist(r, p, X, Y) {
     const c = r.ctx;
-    r.assetFrame('colonists_strip', X - 16, Y - 40, 32, 32, Math.max(0, portraitFrame(p)));
+    SpeciesArt.draw(r, p.species, X - 16, Y - 40, 32, p.color, portraitFrame(p));
     c.strokeStyle = '#000'; c.lineWidth = 5; c.beginPath(); c.arc(X, Y, 7, 0, Math.PI * 2); c.stroke();
     r.glyph(p.shape, X, Y, 6, p.color, '#fff');
   }
@@ -220,7 +259,7 @@ class MapScreen {
   }
   drawTooltip(game, r, p, px, py) {
     let lines;
-    if (p.terrain === TERRAIN.TOWN) lines = ['Poble: corral i tallers', 'Hi entres caminant durant el desenvolupament'];
+    if (p.terrain === TERRAIN.TOWN) lines = ['Poble: tallers, corral, pub i oficina de terres', 'Hi entres caminant durant el desenvolupament'];
     else {
       lines = [`${terrainName(p)}${p.richness ? ` · ${p.richness} cims` : ''}`,
         `Propietari: ${p.ownerId ? playerById(game.state, p.ownerId).name : 'lliure'}`,
@@ -269,18 +308,17 @@ class MapScreen {
       const cr = this.plotRect(s.plots[this.cursor]);
       r.ctx.setLineDash([8, 6]); r.ctx.strokeStyle = '#fff'; r.ctx.lineWidth = 3; r.ctx.strokeRect(cr.x + 1.5, cr.y + 1.5, cr.w - 3, cr.h - 3); r.ctx.setLineDash([]);
     }
-    if (walk) this.drawWalker(game, r, walk);
+    if (walk) { this.drawWalker(game, r, walk); this.drawTimeBar(game, r, walk); }
     this.drawPlayers(game, r);
     this.drawBottom(game, r);
     const slot = game.devSlot();
-    const planet = game.turns.phase === 'PLANET_EVENT' || game.turns.phase === 'PLANET_EVENT_AFTER';
+    const planet = ['PLANET_EVENT', 'PLANET_EVENT_AFTER', 'TURN_START'].includes(game.turns.phase);
     if (planet && (game.turns.phaseData.items || []).length) this.drawEventCards(game, r, game.turns.phaseData.items, '');
-    else if (slot && slot.stage === 'card') this.drawEventCards(game, r, [slot.event], '');
-    else if (slot && slot.stage === 'countdown') this.drawTurnCountdown(game, r, slot);
+    else if (slot && slot.stage === 'ready') this.drawReadyPrompt(game, r, slot);
     const ptr = game.input.pointer; const under = inTown ? null : this.plotAt(game, ptr.x, ptr.y);
     const kbd = !walk && r.focusId === 'map' && r.showFocus ? s.plots[this.cursor] : null;
     const tipPlot = under || kbd;
-    const cards = planet || (slot && slot.stage === 'card');
+    const cards = planet || (slot && slot.stage === 'ready');
     if (tipPlot && !game.paused && !cards) {
       const tr = this.plotRect(tipPlot);
       this.drawTooltip(game, r, tipPlot, under ? ptr.x : tr.x + 40, under ? ptr.y : tr.y + 40);
@@ -293,10 +331,10 @@ class MapScreen {
       const y = 64 + i * 108;
       const current = dev && dev.order[dev.idx] === p.id;
       r.panel(X, y, W, 102, { border: current ? COL.cyan : p.isHuman ? COL.amber : COL.border });
-      r.assetFrame('colonists_strip', X + 8, y + 8, 64, 64, Math.max(0, portraitFrame(p)));
+      SpeciesArt.draw(r, p.species, X + 8, y + 8, 64, p.color, portraitFrame(p));
       r.glyph(p.shape, X + 86, y + 20, 9, p.color, '#05070d');
       r.text(`${p.name}${p.isHuman ? ' (tu)' : ''}`, X + 102, y + 8, { size: 18, maxW: 150 });
-      r.text(p.isHuman ? 'jugador' : AI_PROFILES[p.aiProfile].label, X + 102, y + 32, { size: 16, color: COL.dim, maxW: 150 });
+      r.text(speciesById(p.species).label, X + 102, y + 32, { size: 16, color: COL.dim, maxW: 120 });
       r.text(fmtCr(p.cash), X + W - 10, y + 8, { size: 18, color: COL.amber, align: 'right' });
       if (land) {
         const got = land.claimed[p.id];
@@ -320,6 +358,8 @@ class MapScreen {
       r.text(`${st} u · compra ${StoreSystem.bid(s, d)} · ven ${st > 0 ? StoreSystem.ask(s, d) : '—'}`, X + 42, y + 34 + k * 30, { size: 16, maxW: 316 });
     });
     r.text(`Corral: ${s.store.ruc} RUCs · ${StoreSystem.rucPrice(s)} cr`, X + 10, y + 34 + 3 * 30, { size: 16 });
+    const sales = LandOffice.forSale(s);
+    if (sales.length) r.text(`En venda: ${sales.map((x) => `#${x.plotId + 1} (${playerById(s, x.pid).name})`).join(', ')}`, X + 10, y + 34 + 4 * 30 - 6, { size: 14, color: COL.amber, maxW: 348 });
   }
   /** Touch / pointer direction pad for walking: each arrow is held (pointer down) and released (pointer up). */
   drawPad(game, r, cx, cy) {
@@ -369,35 +409,43 @@ class MapScreen {
         : cr ? `Portes un RUC ${cr.module ? `equipat per a ${resLabel(cr.module).toLowerCase()}` : 'sense equipar'} (robot: ${cr.paid} cr)` : 'No portes cap RUC';
       r.text(carry, X + 12, Y + 8, { size: 18, color: busy ? COL.amber : cr ? COL.amber : COL.text, maxW: 660 });
       r.text(walk.msg || (walk.area === 'town' ? 'Camina dins dels edificis per usar-los. Surt per les vores obertes.' : 'Acció sobre la casa d\'una parcel·la teva: instal·la o retira un RUC.'), X + 12, Y + 36, { size: 16, color: walk.bad ? COL.bad : COL.dim, maxW: 660 });
+      r.text(`${MapScreen.timeBar(s, walk).units} u`, X + 650, Y + 8, { size: 18, color: who.color, align: 'right' });
       r.button('d-act', 'Acció (Enter)', X + 12, Y + 72, 200, 40, { primary: true, disabled: busy, onClick: () => game.devAction() });
       r.button('d-end', cr ? 'Acabar (el RUC fugirà)' : 'Acabar el torn', X + 222, Y + 72, 250, 40, { onClick: () => game.devFinish() });
       r.text('Fletxes: caminar', X + 484, Y + 84, { size: 16, color: COL.dim });
       this.drawPad(game, r, X + 790, Y + 61);
       return;
     }
-    r.assetFrame('colonists_strip', X + 8, Y + 8, 64, 64, Math.max(0, portraitFrame(who)));
-    if (slot.stage === 'card') {
-      r.text(`Esdeveniment abans del teu torn: ${slot.event.name}`, X + 84, Y + 10, { size: 18, maxW: 760 });
-      r.button('d-card', 'Continuar (Enter)', X + 84, Y + 72, 240, 40, { primary: true, onClick: () => game.devSkipCard() });
+    SpeciesArt.draw(r, who.species, X + 8, Y + 8, 64, who.color, portraitFrame(who));
+    if (slot.stage === 'ready') {
+      r.text(slot.event ? `Esdeveniment: ${slot.event.name}` : `Torn de desenvolupament de ${who.name}`, X + 84, Y + 10, { size: 18, maxW: 760 });
+      r.button('d-start', 'Començar (Enter)', X + 84, Y + 72, 240, 40, { primary: true, onClick: () => game.devStart() });
       return;
     }
     r.text(`Torn de desenvolupament de ${who.name}${dev.reversed ? ' · corral amb 7 RUCs o menys: ordre invers' : ''}`, X + 84, Y + 8, { size: 18, maxW: 770 });
     (slot.log || []).slice(0, 3).forEach((l, i) => r.text(l, X + 84, Y + 36 + i * 24, { size: 16, color: COL.dim, maxW: 770 }));
   }
   /**
-   * "Get ready" modal shown for CONFIG.DEV.countdownMs right before the human's development slot starts (no skip button on
-   * purpose): the walk and its clock only begin once this ends, so the turn never starts while the player is still reacting.
+   * [C64] "PRESS YOUR STICK BUTTON TO START": the personal event (if any) is shown first, above the prompt; nothing runs until the
+   * player presses Acció / Enter / Space or clicks (Game.devStart).
    */
-  drawTurnCountdown(game, r, slot) {
+  drawReadyPrompt(game, r, slot) {
     r.dim(0.6);
-    const p = playerById(game.state, slot.pid);
-    const secs = Math.max(1, Math.ceil(slot.timer / 1000));
-    const x = 390; const y = 210; const w = 500; const h = 300;
-    r.panel(x, y, w, h, { border: COL.amber });
-    r.assetFrame('colonists_strip', x + w / 2 - 32, y + 24, 64, 64, Math.max(0, portraitFrame(p)));
-    r.text(`Comença el torn de ${p.name}`, x + w / 2, y + 104, { size: 22, color: COL.amber, align: 'center', maxW: w - 40 });
-    r.text(String(secs), x + w / 2, y + 136, { size: 72, color: COL.text, align: 'center' });
-    r.text('Prepara\'t per caminar...', x + w / 2, y + 244, { size: 18, color: COL.dim, align: 'center' });
+    const p = playerById(game.state, slot.pid); const ev = slot.event;
+    if (ev) {
+      const x = 340; const y = 96; const w = 600;
+      r.panel(x, y, w, 330, { border: ev.negative ? COL.bad : COL.good });
+      r.text(ev.name, x + w / 2, y + 14, { size: 24, color: ev.negative ? COL.bad : COL.good, align: 'center', maxW: w - 20 });
+      r.assetFrame('event_cards_strip', x + 160, y + 50, w - 320, 150, ev.art);
+      r.wrap(ev.text, x + 24, y + 214, w - 48, 24, { size: 18, align: 'center' });
+    }
+    const x = 340; const y = ev ? 440 : 250; const w = 600; const h = 150;
+    r.panel(x, y, w, h, { border: p.color });
+    SpeciesArt.draw(r, p.species, x + 20, y + 22, 96, p.color, portraitFrame(p));
+    r.text(`Torn de ${p.name}`, x + 136, y + 22, { size: 20, color: p.color, maxW: w - 150 });
+    r.text('Prem el botó per començar', x + 136, y + 56, { size: 26, color: COL.amber, maxW: w - 150 });
+    r.text('Acció, Enter, Espai o clic', x + 136, y + 100, { size: 16, color: COL.dim, maxW: w - 150 });
+    r.region('ready-start', 0, 60, 880, 520, { focusable: true, label: 'Comença el torn', onClick: () => game.devStart(), onKey: (e) => { if (e.key === 'Enter' || e.key === ' ') { game.devStart(); return true; } return false; } });
   }
   drawEventCards(game, r, items, emptyText) {
     r.dim(0.55);
@@ -417,7 +465,7 @@ class MapScreen {
       r.wrap(ev.text, x + 20, y + 320, w - 40, 24, { size: 18, align: 'center' });
       r.text('Esdeveniment original (C64)', x + w / 2, y + 430, { size: 16, color: COL.dim, align: 'center', maxW: w - 20 });
     });
-    const skip = () => { if (game.turns.phase === 'DEVELOPMENT') game.devSkipCard(); else game.skipPhase(); };
+    const skip = () => game.skipPhase();
     r.region('event-skip', 0, 0, CONFIG.W, CONFIG.H, { focusable: true, label: 'Salta la targeta', onClick: skip, onKey: (e) => { if (e.key === 'Enter' || e.key === ' ') { skip(); return true; } return false; } });
     r.text('Clic, Enter o Espai per continuar', 640, 620, { size: 16, color: COL.dim, align: 'center' });
   }

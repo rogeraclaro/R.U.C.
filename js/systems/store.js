@@ -41,7 +41,7 @@ const StoreSystem = {
     const rows = state.settlement && state.settlement.turn === state.turn ? state.settlement.rows : [];
     const produced = (pid, res) => { const row = rows.find((r) => r.playerId === pid); return row ? row.produced[res] || 0 : 0; };
     const nonEnergy = (pid) => state.plots.filter((q) => q.ownerId === pid && q.ruc && q.ruc.module !== 'energy').length;
-    const req = state.turn >= CONFIG.TURNS ? 0 : ConsumptionSystem.foodNeed(state.turn + 1);
+    const req = state.turn >= lastRound(state) ? 0 : ConsumptionSystem.foodNeed(state.turn + 1);
     const foodSupply = state.players.reduce((s, p) => s + Math.floor(Math.max(0, p.inventory.food - req) / 2) + produced(p.id, 'food'), stock.food || 0);
     P.food = this.limit(defs.food, this.supplyDemand(this.price(state, defs.food), req * 4, foodSupply));
     const energySupply = state.players.reduce((s, p) => s + Math.floor(Math.max(0, p.inventory.energy - nonEnergy(p.id)) * 3 / 4) + produced(p.id, 'energy'), stock.energy || 0);
@@ -49,7 +49,9 @@ const StoreSystem = {
     P.energy = this.limit(defs.energy, this.supplyDemand(this.price(state, defs.energy), energyDemand, energySupply));
     const sp = CONFIG.STORE_PRICE;
     const smithore = Math.max(sp.smithoreInterimMin, this.supplyDemand(this.price(state, defs.smithore), this.muleDemand(state), state.store.ruc + Math.floor((stock.smithore || 0) / 2), true));
-    P.smithore = this.limit(defs.smithore, smithore + sp.smithoreStep * clamp(binomialStep(rng, 1), -sp.smithoreStepMax, sp.smithoreStepMax));
+    // [Atari code] Beginner: smithore stays at $50 (no supply/demand, no random step).
+    const fixed = levelRules(state).smithorePrice;
+    P.smithore = fixed || this.limit(defs.smithore, smithore + sp.smithoreStep * clamp(binomialStep(rng, 1), -sp.smithoreStepMax, sp.smithoreStepMax));
     return { food: P.food, energy: P.energy, smithore: P.smithore };
   },
   buyRuc(state, playerId) {
@@ -91,8 +93,16 @@ const StoreSystem = {
    * (or what events changed).
    */
   betweenTurns(state) {
-    let made = 0;
-    while (state.store.ruc < CONFIG.RUC_MAX && state.store.stock.smithore >= CONFIG.SMITHORE_PER_RUC) {
+    let made = 0; const rules = levelRules(state);
+    if (rules.rucReset) {
+      // [Atari code] Beginner: every round the store's smithore goes back to 0 and the corral to 25 M.U.L.E.s (book-kept as made / lost).
+      if (state.store.stock.smithore > 0) ResourceLedger.moveItem(state, 'smithore', 'store', 'nature', state.store.stock.smithore);
+      const diff = rules.rucMax - state.store.ruc;
+      state.store.ruc = rules.rucMax;
+      if (diff >= 0) state.rucs.made += diff; else state.rucs.lost -= diff;
+      return { rucsMade: Math.max(0, diff) };
+    }
+    while (state.store.ruc < rules.rucMax && state.store.stock.smithore >= CONFIG.SMITHORE_PER_RUC) {
       ResourceLedger.moveItem(state, 'smithore', 'store', 'nature', CONFIG.SMITHORE_PER_RUC);
       state.store.ruc += 1; made++;
     }

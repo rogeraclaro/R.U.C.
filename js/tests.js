@@ -9,7 +9,7 @@ function runSelfTests() {
     catch (e) { results.push({ name, ok: false, detail: `threw ${e.message}` }); }
   };
   const eq = (a, b, what = '') => (a === b ? true : `${what} expected ${b}, got ${a}`);
-  const fresh = (seed = 'test', difficulty = 'colony') => GameState.create({ seed, difficulty });
+  const fresh = (seed = 'test', level = 'standard', species = 'mechtron') => GameState.create({ seed, level, species });
   // Ledger-based setters keep the conservation invariant valid (tests that audit must never poke balances directly).
   const setInv = (state, id, res, n) => {
     const cur = ResourceLedger.stock(state, id, res);
@@ -45,7 +45,7 @@ function runSelfTests() {
     const dy = b.door === 'bottom' ? -1 : 1;
     goUntil(state, w, { x: 0, y: w.y < midY ? 1 : -1 }, () => Math.abs(w.y - midY) < 4);
     goUntil(state, w, { x: Math.sign(b.spot.x - w.x), y: 0 }, () => Math.abs(w.x - b.spot.x) < 4);
-    goUntil(state, w, { x: 0, y: dy }, () => !!w.visiting);
+    goUntil(state, w, { x: 0, y: dy }, () => !!w.visiting || w.visited || !!w.ended); // the pub / land office have no RUC visit
     go(state, w, { x: 0, y: dy }, CONFIG.WALK.visitMs + 50);
     goUntil(state, w, { x: 0, y: -dy }, () => w.latch === null);
     return w.log.slice(n);
@@ -123,8 +123,8 @@ function runSelfTests() {
     return eq(ProductionSystem.meanYield(state, state.plots[0]), 0, 'river mean');
   });
   t('Harvest variation: [Atari code] Standard round(0.5 x binomial) -> -1/0/+1 at ~16/68/16 %, +-2 rare (~0.1 %), seeded', () => {
-    const rng = new SeededRNG('var'); const N = 40000; const n = new Map();
-    for (let i = 0; i < N; i++) { const v = ProductionSystem.variation(rng); n.set(v, (n.get(v) || 0) + 1); }
+    const rng = new SeededRNG('var'); const N = 40000; const n = new Map(); const { state } = fresh();
+    for (let i = 0; i < N; i++) { const v = ProductionSystem.variation(state, rng); n.set(v, (n.get(v) || 0) + 1); }
     const pct = (v) => 100 * (n.get(v) || 0) / N;
     if ([...n.keys()].some((v) => Math.abs(v) > 3)) return `out of range ${JSON.stringify([...n])}`;
     if (Math.abs(pct(0) - 67.664) > 1.2 || Math.abs(pct(1) - 16.063) > 1 || Math.abs(pct(-1) - 16.063) > 1) return `0 ${pct(0)} +1 ${pct(1)} -1 ${pct(-1)}`;
@@ -233,17 +233,17 @@ function runSelfTests() {
     if (row.missingFood !== 3) return `missing ${row.missingFood}`;
     return p.cash === cash && !('survivalDebt' in p) && !('debt' in ScoringSystem.breakdown(state, p)) ? true : 'hunger must not cost money';
   });
-  t('Development time: [Atari code][C64] 10 + floor(91 x min(1, food / need)) units of 28 PAL frames (full ~56.4 s), any difficulty; species hook', () => {
+  t('Development time: [Atari code][C64] 10 + floor(91 x min(1, food / need)) units of 28 PAL frames (full ~56.4 s); species and level change the unit', () => {
     const units = [[0, 3], [1, 3], [2, 3], [3, 3], [9, 3], [3, 4], [4, 5]].map(([f, n]) => ConsumptionSystem.devUnits(f, n)).join();
     if (units !== '10,40,70,101,101,78,82') return `units ${units}`;
-    for (const diff of Object.keys(CONFIG.DIFFICULTY)) {
-      const { state } = fresh('time', diff); state.turn = 1; const p = state.players[0];
-      if (ConsumptionSystem.humanTimeMs(state, p) !== 56419) return `${diff}: full food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
-      setInv(state, 'p0', 'food', 1); if (ConsumptionSystem.humanTimeMs(state, p) !== 22344) return `${diff}: 1 food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
-      setInv(state, 'p0', 'food', 0); if (ConsumptionSystem.humanTimeMs(state, p) !== 5586) return `${diff}: no food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
-    }
-    const { state } = fresh(); state.turn = 1;
-    return eq(ConsumptionSystem.humanTimeMs(state, state.players[0], 9 / 7), 72539, 'species factor 9/7 (Flapper, 36 frames per unit)');
+    const { state } = fresh('time'); state.turn = 1; const p = state.players[0];
+    if (ConsumptionSystem.humanTimeMs(state, p) !== 56419) return `full food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
+    setInv(state, 'p0', 'food', 1); if (ConsumptionSystem.humanTimeMs(state, p) !== 22344) return `1 food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
+    setInv(state, 'p0', 'food', 0); if (ConsumptionSystem.humanTimeMs(state, p) !== 5586) return `no food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
+    // [Atari code] a unit is 7 BTU (28 frames): Flapper +2 BTU, Humanoid -2 BTU, Beginner +2 BTU on top.
+    const full = (level, species) => { const { state: st } = fresh('time', level, species); st.turn = 1; return ConsumptionSystem.humanTimeMs(st, st.players[0]); };
+    const got = [['standard', 'flapper'], ['standard', 'humanoid'], ['beginner', 'mechtron'], ['beginner', 'flapper'], ['beginner', 'humanoid']].map(([l, sp]) => full(l, sp)).join();
+    return eq(got, '72539,40299,72539,88658,56419', 'flapper / humanoid / beginner full turns');
   });
 
   /* ---------- P1.5 store ---------- */
@@ -385,7 +385,21 @@ function runSelfTests() {
     if (!state.plots[31].ruc || state.plots[31].ruc.module !== 'food' || w.carrying || w.installing) return `not installed after installMs: ${w.msg}`;
     return p.cash === cash ? audited(state) : 'installing changed the cash';
   });
-  t('Walk speed: 2/3 of the previous PROVISIONAL values (per playtesting feedback)', () => eq(`${CONFIG.WALK.mapSpeed}/${CONFIG.WALK.townSpeed}`, '0.12/0.2', 'WALK speeds'));
+  t('Walk speed: [C64] map 0.667 h / 0.333 v px per frame on a 32-px plot (x3 to our TILE), town 1.33 px/frame; terrain 6/14/21 frames per step', () => {
+    const { state, w } = walkState(); const near = (a, b) => Math.abs(a - b) < 1e-9;
+    const town = DevWalk.speed(state, w);
+    if (!near(town.x, 4 * CONFIG.DEV.palHz / 1000) || !near(town.y, 2 * CONFIG.DEV.palHz / 1000)) return `town ${JSON.stringify(town)}`;
+    const at = (id) => { const p = state.plots[id]; w.area = 'map'; w.x = p.x * CONFIG.TILE + 40; w.y = p.y * CONFIG.TILE + 40; return DevWalk.speed(state, w); };
+    const plain = state.plots.find((p) => p.terrain === TERRAIN.PLAIN); const mount = state.plots.find((p) => p.terrain === TERRAIN.MOUNTAIN);
+    const sp = at(plain.id); const sr = at(4); const sm = at(mount.id);
+    if (!near(sp.x, 2 * CONFIG.DEV.palHz / 1000) || !near(sp.y, CONFIG.DEV.palHz / 1000)) return `plain ${JSON.stringify(sp)}`;
+    if (!near(sr.x, sp.x * 6 / 14) || !near(sm.y, sp.y * 6 / 21)) return `river ${JSON.stringify(sr)} mountain ${JSON.stringify(sm)}`;
+    // Crossing a plain plot horizontally takes ~48 PAL frames (~958 ms), vertically ~96 (~1915 ms), at any frame size.
+    const cross = (dir, dt) => { const { state: st, w: ww } = walkState(); ww.area = 'map'; ww.x = plain.x * CONFIG.TILE + 0.5; ww.y = plain.y * CONFIG.TILE + 0.5; let ms = 0;
+      while (DevWalk.plotAt(st, ww.x, ww.y).id === plain.id && ms < 5000) { DevWalk.update(st, ww, dir, dt); ms += dt; } return ms; };
+    const h = cross({ x: 1, y: 0 }, 10); const v = cross({ x: 0, y: 1 }, 10); const h17 = cross({ x: 1, y: 0 }, 17);
+    return Math.abs(h - 958) <= 20 && Math.abs(v - 1915) <= 20 && Math.abs(h17 - h) <= 17 ? true : `crossing h ${h} ms (17 ms frames ${h17}), v ${v} ms`;
+  });
   t('Install animation: blocks movement and Acció while it plays, resolves after exactly CONFIG.WALK.installMs', () => {
     const { state, w } = walkState(); LandGrantSystem.assign(state, 'p0', 31);
     visit(state, w, 'corral'); visit(state, w, 'shop_food'); leaveSouth(state, w); toHouse(state, w, 31);
@@ -415,28 +429,30 @@ function runSelfTests() {
   t('Shop entry is not instant: a brief graze against the doorway (short of CONFIG.WALK.doorHoldMs) does not trigger a visit', () => {
     const { state, w } = walkState(); const p = state.players[0]; const cash0 = p.cash; const ruc0 = state.store.ruc;
     goUntil(state, w, { x: 0, y: w.y < midY ? 1 : -1 }, () => Math.abs(w.y - midY) < 4);
-    goUntil(state, w, { x: Math.sign(109 - w.x), y: 0 }, () => Math.abs(w.x - 109) < 4);
+    const fx = TOWN.buildings.find((b) => b.id === 'shop_food').spot.x;
+    goUntil(state, w, { x: Math.sign(fx - w.x), y: 0 }, () => Math.abs(w.x - fx) < 4);
     goUntil(state, w, { x: 0, y: -1 }, () => w.y <= TOWN.streetTop + 1); // right up against shop_food's doorway
     go(state, w, { x: 0, y: -1 }, CONFIG.WALK.doorHoldMs - 100); // a shorter push than it takes to commit
     if (!w.latch) return 'test setup: did not even touch the building';
     go(state, w, { x: 0, y: 1 }, 80); // straight back out before committing
     return !w.visiting && !w.visited && !w.carrying && state.store.ruc === ruc0 && p.cash === cash0 && w.log.length === 0 ? true : `grazing acted: log ${w.log}, cash ${p.cash}, corral ${state.store.ruc}`;
   });
-  t('Human turn countdown: a 3 s "get ready" modal runs before the walk starts; its clock is untouched until then', () => {
-    const g = mkGame(); g.newGame({ seed: 'countdown-1', difficulty: 'relaxed' });
+  t('Turn start: [C64] "Prem el botó per començar" waits for the human (no countdown); the walk and its clock start on the button', () => {
+    if ('countdownMs' in CONFIG.DEV) return 'the 3 s countdown still exists';
+    const g = mkGame(); g.newGame({ seed: 'ready-1' });
     let guard = 0;
-    while (guard++ < 200000 && !(g.turns.phase === 'DEVELOPMENT' && g.devSlot() && g.devSlot().pid === 'p0' && g.devSlot().stage !== 'card')) {
-      const s = g.devSlot(); if (s && s.stage === 'card') g.devSkipCard();
-      g.tick(50);
-    }
+    while (guard++ < 200000 && !(g.turns.phase === 'DEVELOPMENT' && g.devSlot() && g.devSlot().pid === 'p0')) { if (g.turns.phaseData.skippable) g.skipPhase(); g.tick(50); }
     const slot = g.devSlot();
-    if (!slot || slot.pid !== 'p0' || slot.stage !== 'countdown' || g.humanWalk()) return `expected the human's countdown, got phase ${g.turns.phase} stage ${slot && slot.stage}`;
-    for (let i = 0; i < Math.floor(CONFIG.DEV.countdownMs / 50) - 2; i++) g.tick(50);
-    if (g.humanWalk()) return 'the walk started before the 3 s countdown finished';
-    for (let i = 0; i < 4; i++) g.tick(50);
+    if (!slot || slot.stage !== 'ready' || g.humanWalk()) return `expected the human's ready prompt, got phase ${g.turns.phase} stage ${slot && slot.stage}`;
+    for (let i = 0; i < 400; i++) g.tick(50); // 20 s: nothing starts by itself
+    if (g.humanWalk() || g.devSlot().stage !== 'ready') return 'the turn started without the button';
+    if (g.hudTimer() !== null) return 'no horizontal HUD timer during development (the time bar is vertical, on the map)';
+    g.devStart();
     const w = g.humanWalk();
-    // A little slack: some of these 4 ticks land after the walk was already created and ticking down its own clock.
-    return w && w.timeTotal - w.timeLeft <= 200 ? true : `walk did not start with a fresh clock (${JSON.stringify(w)})`;
+    if (!w || w.timeLeft !== w.timeTotal) return `walk did not start with a fresh clock (${JSON.stringify(w)})`;
+    g.tick(50);
+    const bar = MapScreen.timeBar(g.state, g.humanWalk());
+    return bar.units === DevWalk.unitsLeft(w) && bar.frac > 0.98 && bar.frac <= 1 && bar.color === playerById(g.state, 'p0').color ? true : `bar ${JSON.stringify(bar)}`;
   });
   t('Walk: no remote development (no panel API, the button does nothing in town); unoutfitted or a foreign plot never installs', () => {
     if (['humanPickPlot', 'confirmInstall', 'chooseModule', 'buyRuc', 'returnRuc', 'canInstall'].some((m) => typeof Game.prototype[m] === 'function')) return 'a remote development API still exists';
@@ -494,6 +510,121 @@ function runSelfTests() {
     const script = (st, ww) => { leaveSouth(st, ww); toHouse(st, ww, 31); DevWalk.act(st, ww); go(st, ww, { x: 1, y: -1 }, 900); };
     script(state, w); script(back.state, back.w);
     return JSON.stringify({ s: back.state, w: back.w }) === JSON.stringify({ s: state, w }) ? true : 'diverged after resuming';
+  });
+
+  /* ---------- town, pub, land office, species, levels (fidelity batches 3 and 5) ---------- */
+  t('Town: [C64] top row crystite (closed) / smithore / energy / food; bottom row assay (closed) / land office / pub / corral', () => {
+    const row = (top) => TOWN.buildings.filter((b) => (b.y < TOWN.streetTop) === top).sort((a, b) => a.x - b.x).map((b) => `${b.id}${b.kind === 'closed' ? '*' : ''}`).join();
+    const top = row(true); const bottom = row(false);
+    if (top !== 'shop_crystite*,shop_smithore,shop_energy,shop_food') return `top ${top}`;
+    if (bottom !== 'assay*,land_office,pub,corral') return `bottom ${bottom}`;
+    const { state } = fresh('signs');
+    return MapScreen.corralSign(state) === 'RUCs 100 cr' && MapScreen.moneyLine(state.players[0]) === 'Els teus diners: 1000 cr' ? true : `${MapScreen.corralSign(state)} / ${MapScreen.moneyLine(state.players[0])}`;
+  });
+  t('Town: the closed crystite shop and assay office have no door — pushing at them does nothing', () => {
+    for (const id of ['shop_crystite', 'assay']) {
+      const { state, w } = walkState(`closed-${id}`); const b = TOWN.buildings.find((x) => x.id === id); const cash = state.players[0].cash;
+      goUntil(state, w, { x: 0, y: w.y < midY ? 1 : -1 }, () => Math.abs(w.y - midY) < 4);
+      goUntil(state, w, { x: Math.sign(b.x + b.w / 2 - w.x), y: 0 }, () => Math.abs(w.x - (b.x + b.w / 2)) < 4);
+      go(state, w, { x: 0, y: b.y < TOWN.streetTop ? -1 : 1 }, 3000);
+      if (w.visiting || w.visited || w.log.length || w.ended || state.players[0].cash !== cash) return `${id}: something happened (${w.log})`;
+    }
+  });
+  t('Pub: [Atari code][C64] round bonus 50 / 100 / 150 / 200 + (rand 0..255 mod 2 x units left); a sum above 255 pays 250', () => {
+    const b = [1, 3, 4, 7, 8, 11, 12].map((r) => PubSystem.bonus(r)).join();
+    if (b !== '50,50,100,100,150,150,200') return `bonus ${b}`;
+    const cases = [[50, 28, 99, 78], [50, 3, 82, 53], [200, 255, 101, 253], [150, 120, 101, 250], [200, 201, 101, 250], [50, 77, 0, 50]];
+    const bad = cases.filter(([bo, r, u, want]) => PubSystem.payout(bo, r, u) !== want);
+    return bad.length ? `payout ${JSON.stringify(bad.map(([bo, r, u]) => PubSystem.payout(bo, r, u)))}` : true;
+  });
+  t('Pub: walking in ends the development turn and pays "Has guanyat N cr jugant!" (ledger kept); with a RUC "No s\'hi admeten RUCs"', () => {
+    const { state, w } = walkState('pub'); state.turn = 1; const p = state.players[0]; const cash = p.cash;
+    const log = visit(state, w, 'pub');
+    if (w.ended !== 'pub' || log.join() !== 'pub') return `ended ${w.ended}, log ${log}`;
+    const won = p.cash - cash;
+    if (won < 50 || won > 50 + 2 * 107 || w.msg !== `Has guanyat ${won} cr jugant!`) return `won ${won}: ${w.msg}`;
+    const bad = audited(state); if (bad !== true) return bad;
+    const r = walkState('pub2'); r.state.turn = 1; visit(r.state, r.w, 'corral');
+    const log2 = visit(r.state, r.w, 'pub');
+    if (r.w.ended || !r.w.carrying || log2.join() !== 'refused' || r.w.msg !== 'No s\'hi admeten RUCs.') return `with a RUC: ended ${r.w.ended}, log ${log2}, ${r.w.msg}`;
+    return audited(r.state, 1);
+  });
+  t('AI turn: [Atari code] installs cost 25 + 2 x distance units while >= 35 are left, then the pub if >= 3 are left', () => {
+    const { state, rng } = fresh('aipub'); state.turn = 1; const p = state.players[1];
+    [0, 8].forEach((id) => LandGrantSystem.assign(state, 'p1', id));
+    setInv(state, 'p1', 'food', 0); // 10 units: no install (< 35), pub with 10 units left
+    const cash = p.cash; const r = AISystem.turn(state, rng, p);
+    if (r.installs.length || r.unitsLeft !== 10) return `starving: ${JSON.stringify(r)}`;
+    if (!(r.pub >= 50 && r.pub < 70) || p.cash !== cash + r.pub) return `pub ${r.pub}, cash ${p.cash - cash}`;
+    const { state: s2, rng: g2 } = fresh('aipub2'); s2.turn = 1; const q = s2.players[2]; setCash(s2, 'p2', 5000);
+    [0, 8, 36].forEach((id) => LandGrantSystem.assign(s2, 'p2', id));
+    const r2 = AISystem.turn(s2, g2, q);
+    const spent = r2.installs.reduce((acc, a) => { const pl = s2.plots[a.plotId]; return acc + 25 + 2 * (Math.abs(pl.x - CONFIG.RIVER_COL) + Math.abs(pl.y - CONFIG.TOWN_ROW)); }, 0);
+    if (!r2.installs.length || r2.unitsLeft !== 101 - spent) return `installs ${JSON.stringify(r2)}`;
+    return audited(s2);
+  });
+  t('Land office: [manual][C64] Standard: "Marca la parcel·la per vendre i torna" -> mark your plot -> back at the office it is stored for sale (inert)', () => {
+    const { state, w } = walkState('office'); LandGrantSystem.assign(state, 'p0', 31); state.turn = 2;
+    if (visit(state, w, 'land_office').join() !== 'office' || w.msg !== 'Marca la parcel·la per vendre i torna.') return `office: ${w.msg}`;
+    if (visit(state, w, 'land_office').join() !== 'no_mark') return `no plot marked: ${w.msg}`;
+    leaveSouth(state, w); toHouse(state, w, 31);
+    if (DevWalk.act(state, w) !== 'mark' || w.markPlot !== 31) return `mark: ${w.msg}`;
+    if (!goUntil(state, w, { x: 0, y: -1 }, () => w.area === 'town')) return 'back to town';
+    if (visit(state, w, 'land_office').join() !== 'for_sale') return `for sale: ${w.msg}`;
+    const sale = LandOffice.forSale(state);
+    if (sale.length !== 1 || sale[0].pid !== 'p0' || sale[0].plotId !== 31 || sale[0].turn !== 2) return JSON.stringify(state.landSales);
+    if (JSON.stringify(JSON.parse(JSON.stringify(state.landSales))) !== JSON.stringify(state.landSales)) return 'not JSON-safe';
+    state.plots[31].ownerId = 'p1'; // plot lost (e.g. an event): the mark simply no longer counts
+    if (LandOffice.forSale(state).length) return 'a mark on a plot you no longer own must not count';
+    const b = fresh('office-b', 'beginner'); const wb = DevWalk.create(b.state, 'p0', 60000);
+    const log = visit(b.state, wb, 'land_office');
+    return log.join() === 'refused' && !b.state.landSales.length ? audited(state) : `beginner: ${log} ${wb.msg}`;
+  });
+  t('Species: [Atari code][C64] 8 species; Flapper 1600 cr, Humanoid 600, others 1000; computers are always Mechtrons with 1000', () => {
+    const ids = CONFIG.SPECIES.map((x) => x.id).join();
+    if (ids !== 'mechtron,gollumer,packer,bonzoid,spheroid,flapper,leggite,humanoid') return ids;
+    if (CONFIG.SPECIES.some((x) => !x.label || !x.desc)) return 'label / description missing';
+    for (const [sp, cash] of [['flapper', 1600], ['humanoid', 600], ['leggite', 1000], ['mechtron', 1000]]) {
+      const { state } = fresh('sp', 'standard', sp);
+      if (state.players[0].cash !== cash || state.players[0].species !== sp) return `${sp}: ${state.players[0].cash}`;
+      if (!state.players.slice(1).every((q) => q.species === 'mechtron' && q.cash === 1000)) return 'computers';
+      const bad = audited(state); if (bad !== true) return `${sp}: ${bad}`;
+    }
+  });
+  t('Levels: Principiant (6 rounds) and Estàndard (12, default); Torneig disabled; one AI level (no difficulty knobs)', () => {
+    if (Object.keys(CONFIG.LEVELS).join() !== 'beginner,standard,tournament') return Object.keys(CONFIG.LEVELS).join();
+    if (CONFIG.LEVELS.beginner.label !== 'Principiant' || CONFIG.LEVELS.standard.label !== 'Estàndard' || CONFIG.LEVELS.tournament.label !== 'Torneig') return 'labels';
+    if (!CONFIG.LEVELS.tournament.disabled || CONFIG.LEVELS.standard.disabled || CONFIG.LEVELS.beginner.disabled) return 'only Torneig is disabled';
+    const { state } = GameState.create({ seed: 'lv' });
+    if (state.level !== 'standard' || lastRound(state) !== 12 || 'difficulty' in state) return `default ${state.level}`;
+    if (lastRound(fresh('lv', 'beginner').state) !== 6) return 'beginner rounds';
+    if (mkGame().setup.level !== 'standard') return 'setup default';
+    return ['reactMin', 'reactMax', 'valuationErr', 'minReserve'].every((k) => typeof CONFIG.AI[k] === 'number') ? true : 'CONFIG.AI';
+  });
+  t('Beginner: [Atari code] 8 food / 4 energy, store 16 / 16 / 0 and 25 RUCs reset every round, no production variation, smithore fixed at 50', () => {
+    const { state, rng } = fresh('beg', 'beginner'); const st = state.store;
+    if (!state.players.every((p) => p.inventory.food === 8 && p.inventory.energy === 4)) return 'start goods';
+    if (`${st.stock.food}/${st.stock.energy}/${st.stock.smithore}/${st.ruc}` !== '16/16/0/25') return `store ${st.stock.food}/${st.stock.energy}/${st.stock.smithore}/${st.ruc}`;
+    state.turn = 2; const plot = develop(state, 'p0', 0, 'food');
+    for (let i = 0; i < 200; i++) if (ProductionSystem.rollYield(state, plot, rng) !== ProductionSystem.expectedYield(state, plot)) return 'production varied in Beginner';
+    ResourceLedger.moveItem(state, 'smithore', 'nature', 'store', 6);
+    StoreSystem.updatePrices(state, rng); if (state.storePrice.smithore !== 50) return `smithore ${state.storePrice.smithore}`;
+    StoreSystem.betweenTurns(state);
+    if (st.ruc !== 25 || st.stock.smithore !== 0) return `reset: corral ${st.ruc}, smithore ${st.stock.smithore}`;
+    return audited(state);
+  });
+  t('Beginner: [Atari code][manual] a RUC never runs away on a wrong button press (it only beeps)', () => {
+    const b = fresh('beg-walk', 'beginner'); const w = DevWalk.create(b.state, 'p0', 60000); LandGrantSystem.assign(b.state, 'p1', 40);
+    visit(b.state, w, 'corral'); visit(b.state, w, 'shop_food'); leaveSouth(b.state, w);
+    goUntil(b.state, w, { x: 0, y: 1 }, () => DevWalk.atHouse(w, b.state.plots[40]));
+    const k = DevWalk.act(b.state, w);
+    return k === 'beep' && w.carrying && !w.fleeing && b.state.rucs.lost === 0 ? audited(b.state, 1) : `act ${k}, lost ${b.state.rucs.lost}`;
+  });
+  t('Game: a full Beginner autopilot game lasts 6 rounds and ends with a rating', () => {
+    const g = mkGame(); g.autopilot = true; g.newGame({ seed: 'beg-full', level: 'beginner' });
+    for (let n = 0; n < 300000 && g.state.phase !== 'GAME_OVER'; n++) g.tick(50);
+    if (g.state.phase !== 'GAME_OVER' || g.state.history.length !== 6) return `phase ${g.state.phase}, history ${g.state.history.length}`;
+    return typeof g.state.final.rating === 'number' ? audited(g.state) : JSON.stringify(g.state.final);
   });
 
   /* ---------- P1.7 auctions ---------- */
@@ -645,11 +776,11 @@ function runSelfTests() {
   });
 
   /* ---------- P2.8 land ---------- */
-  t('Land race: cursor sweeps free plots row-major, skips owned plots and the town instantly, 400 ms per free plot (Colònia)', () => {
+  t('Land race: cursor sweeps free plots row-major, skips owned plots and the town instantly, 320 ms per free plot (Standard)', () => {
     const { state, rng } = fresh('land1');
     [0, 1, 5, 9].forEach((id) => LandGrantSystem.assign(state, 'p3', id));
     const land = LandRace.create(state, rng, []);
-    if (land.msPerPlot !== 400) return `msPerPlot ${land.msPerPlot}`;
+    if (land.msPerPlot !== 320) return `msPerPlot ${land.msPerPlot}`;
     const seq = [land.cursor]; const stamps = [land.clock]; let last = land.cursor;
     while (!land.done) {
       LandRace.update(state, rng, land, 10);
@@ -659,17 +790,17 @@ function runSelfTests() {
     if (seq.join() !== expected.join()) return `sequence ${seq.join()} != ${expected.join()}`;
     if (seq.includes(22)) return 'the town was offered';
     const gaps = stamps.slice(1).map((v, i) => v - stamps[i]);
-    return gaps.every((g) => g === 400) ? true : `dwell gaps ${[...new Set(gaps)].join(',')}`;
+    return gaps.every((g) => g === 320) ? true : `dwell gaps ${[...new Set(gaps)].join(',')}`;
   });
-  t('Land race: speed per difficulty (500 / 400 / 300 ms) and claim pause (2000 ms) come from CONFIG', () => {
-    const got = ['relaxed', 'colony', 'ruthless'].map((d) => { const { state, rng } = fresh('spd', d); return LandRace.create(state, rng, []).msPerPlot; });
-    if (CONFIG.LAND.landClaimPauseMs !== 2000) return `claim pause ${CONFIG.LAND.landClaimPauseMs}`;
-    return eq(got.join(), '500,400,300', 'ms per plot');
+  t('Land race: [C64][Atari code] Standard 16 frames per plot (320 ms) and a 64-frame claim pause (1280 ms); Beginner 32 / 128 frames', () => {
+    const got = ['standard', 'beginner'].map((l) => { const { state, rng } = fresh('spd', l); const land = LandRace.create(state, rng, []); return `${land.msPerPlot}/${land.pauseMs}`; });
+    if ('DIFFICULTY' in CONFIG || 'landClaimPauseMs' in CONFIG.LAND) return 'old difficulty pacing still in CONFIG';
+    return eq(got.join(), '320/1280,640/2550', 'ms per plot / claim pause');
   });
   t('Land race: a colonist claims at most ONE plot per turn; later presses are ignored', () => {
     const { state, rng } = fresh('land2');
     const land = LandRace.create(state, rng, []);
-    raceRun(state, rng, land, 3000, 10, [{ pid: 'p0', at: 100 }, { pid: 'p0', at: 200 }, { pid: 'p1', at: 2200 }]);
+    raceRun(state, rng, land, 3000, 10, [{ pid: 'p0', at: 100 }, { pid: 'p0', at: 200 }, { pid: 'p1', at: 1500 }]);
     if (state.players[0].plots.join() !== '0') return `p0 plots ${state.players[0].plots}`;
     if (state.players[1].plots.join() !== '1') return `p1 plots ${state.players[1].plots}`;
     return land.claimed.p0 === 0 && land.claimed.p1 === 1 && !ResourceLedger.audit(state).length ? true : 'claimed map';
@@ -698,7 +829,7 @@ function runSelfTests() {
     return LandGrantSystem.freePlots(state).length > 0 ? true : 'no free plot was left (test too weak)';
   });
   t('Land race AI: only public cursor path, reaction time respected, always retargets ahead', () => {
-    const { state, rng } = fresh('land5'); const d = CONFIG.DIFFICULTY.colony;
+    const { state, rng } = fresh('land5'); const d = CONFIG.AI;
     const land = LandRace.create(state, rng, state.players.map((p) => p.id));
     let lastClaim = null; const claims = []; let resumedAt = 0; let prevCursor = land.cursor;
     for (let i = 0; i < 20000 && !land.done; i++) {
@@ -712,18 +843,18 @@ function runSelfTests() {
     if (claims.some((c) => c.since < d.reactMin)) return `a claim before the minimum reaction time after the cursor resumed: ${claims.map((c) => c.since)}`;
     return state.players.every((p) => p.plots.length === 1) ? true : 'every colonist must end with exactly one plot';
   });
-  t('Land race pause: after a claim the cursor is hidden and NOBODY can claim for 2000 ms', () => {
+  t('Land race pause: after a claim the cursor is hidden and NOBODY can claim for 1280 ms (Standard)', () => {
     const { state, rng } = fresh('pause1');
     const land = LandRace.create(state, rng, []);
     raceRun(state, rng, land, 110, 10, [{ pid: 'p0', at: 100 }]);
     if (land.claimed.p0 !== 0) return 'p0 should have claimed plot 0';
     if (land.cursor !== -1 || land.pause <= 0) return `cursor ${land.cursor}, pause ${land.pause}`;
     if (LandRace.canClaim(land, 'p1') || LandRace.press(land, 'p1')) return 'a press was accepted during the pause';
-    raceRun(state, rng, land, 1500, 10, [{ pid: 'p1', at: 500 }, { pid: 'p2', at: 1500 }]);
+    raceRun(state, rng, land, 1200, 10, [{ pid: 'p1', at: 500 }, { pid: 'p2', at: 1250 }]);
     if (state.players[1].plots.length || state.players[2].plots.length) return 'a claim slipped in during the pause';
     if (land.cursor !== -1) return 'cursor must stay hidden while paused';
-    raceRun(state, rng, land, 500, 10);
-    return land.cursor === 1 && land.pause <= 0 && land.dwellLeft > 0 && land.dwellLeft <= 400 ? true : `after the pause: cursor ${land.cursor}, pause ${land.pause}, dwell ${land.dwellLeft}`;
+    raceRun(state, rng, land, 200, 10);
+    return land.cursor === 1 && land.pause <= 0 && land.dwellLeft > 0 && land.dwellLeft <= 320 ? true : `after the pause: cursor ${land.cursor}, pause ${land.pause}, dwell ${land.dwellLeft}`;
   });
   t('Land race pause: the sweep resumes at the plot AFTER the claimed one, with a full dwell', () => {
     const { state, rng } = fresh('pause2');
@@ -732,10 +863,10 @@ function runSelfTests() {
     if (land.cursor !== 0) return `start ${land.cursor}`;
     raceRun(state, rng, land, 50, 10, [{ pid: 'p0', at: 20 }]);
     let guard = 0; while (land.pause > 0 && guard++ < 1000) LandRace.update(state, rng, land, 10);
-    return land.cursor === 3 && land.dwellLeft === 400 ? true : `resumed at ${land.cursor} with dwell ${land.dwellLeft} (expected plot 3, owned 1 and 2 skipped)`;
+    return land.cursor === 3 && land.dwellLeft === 320 ? true : `resumed at ${land.cursor} with dwell ${land.dwellLeft} (expected plot 3, owned 1 and 2 skipped)`;
   });
   t('Land race pause: AI reaction timers do not run down during the pause (they restart when the cursor resumes)', () => {
-    const { state, rng } = fresh('pause3'); const d = CONFIG.DIFFICULTY.colony;
+    const { state, rng } = fresh('pause3'); const d = CONFIG.AI;
     const land = LandRace.create(state, rng, ['p1', 'p2', 'p3']);
     raceRun(state, rng, land, 60, 10, [{ pid: 'p0', at: 30 }]);
     if (land.claimed.p0 === undefined) return 'p0 should have claimed first';
@@ -991,7 +1122,7 @@ function runSelfTests() {
     if (!(ids.indexOf('PLANET_EVENT') < ids.indexOf('PRODUCTION') && ids.indexOf('PRODUCTION') < ids.indexOf('PLANET_EVENT_AFTER'))) return ids.join();
     g.debugForced = ['sunspot']; g.turns.enter(g, 'PLANET_EVENT');
     if (!s.modifiers.sunspot || s.events.after) return 'sunspot must act before production';
-    const bag = JSON.stringify(s.events.bag); s.turn = CONFIG.TURNS; g.turns.enter(g, 'PLANET_EVENT');
+    const bag = JSON.stringify(s.events.bag); s.turn = lastRound(s); g.turns.enter(g, 'PLANET_EVENT');
     const it = g.turns.phaseData.items[0];
     if (!it || it.id !== 'ship_back' || it.name !== 'La nau ha tornat!' || JSON.stringify(s.events.bag) !== bag) return 'round 12';
     s.turn = 4; g.turns.enter(g, 'PLANET_EVENT');
@@ -1035,24 +1166,43 @@ function runSelfTests() {
     if (g.state.phase !== 'GAME_OVER' || !f || f.survives || f.winnerId !== null || f.lack !== 'food') return `final ${JSON.stringify(f)}`;
     return GameOverScreen.lackText(f.lack) === 'La colònia ha fracassat per una manca total de menjar!' ? true : GameOverScreen.lackText(f.lack);
   });
-  t('Colony result: [manual] 60,000 combined — 59,999 fails, 60,000 succeeds even with one rich colonist; no First Founder on failure', () => {
-    const { state } = fresh();
+  t('Colony rating: [Atari code] round((total - 10000) / 20000) clamped 0..6, with the 7 original texts in Catalan', () => {
+    const got = [0, 9999, 19999, 20000, 39999, 40000, 59999, 60000, 79999, 80000, 100000, 119999, 120000, 900000].map((v) => ScoringSystem.rating(v)).join();
+    if (got !== '0,0,0,1,1,2,2,3,3,4,5,5,6,6') return `ratings ${got}`;
+    if (COLONY_RATINGS.length !== 7 || !COLONY_RATINGS.every((x) => x.startsWith('En conjunt, la colònia '))) return 'texts';
+    const keys = ['presó per a deutors', 'naus de comerç', 'tendes', 'mínims', 'còmodament', 'finques elegants', 'luxosa'];
+    return keys.every((k, i) => COLONY_RATINGS[i].includes(k)) ? true : COLONY_RATINGS.join(' | ');
+  });
+  t('Colony result: [Atari code] First Founder only at the real end and with a colony of at least 60,000 (rating >= 3); ranking always shown', () => {
+    const { state } = fresh(); state.turn = 12;
     const total = () => state.players.reduce((s, p) => s + ScoringSystem.netWorth(state, p), 0);
     setCash(state, 'p1', state.players[1].cash + 60000 - total() - 1);
     if (ScoringSystem.survival(state).survives || total() !== 59999) return `59,999 -> ${JSON.stringify(ScoringSystem.survival(state))}`;
+    const g = mkGame(); g.state = state; g.rng = new SeededRNG('fin'); g.mode = 'play'; g.finish();
+    if (state.final.winnerId !== null || state.final.rating !== 2) return `59,999 must not give a First Founder: ${JSON.stringify(state.final)}`;
     setCash(state, 'p1', state.players[1].cash + 1);
     const s = ScoringSystem.survival(state);
     if (!s.survives || s.combined !== 60000) return '60,000 must succeed';
-    if (!state.players.filter((p) => p.id !== 'p1').every((p) => ScoringSystem.netWorth(state, p) < 2000)) return 'test setup';
-    const g = mkGame(); g.state = state; g.rng = new SeededRNG('fin'); g.mode = 'play'; g.finish();
-    if (!state.final.survives || state.final.winnerId !== 'p1') return `final ${JSON.stringify(state.final)}`;
-    setCash(state, 'p1', 100); g.finish();
-    return !state.final.survives && state.final.winnerId === null && state.final.rank.length === 4 ? true : 'failure must keep the ranking without a First Founder';
+    g.finish();
+    if (!state.final.survives || state.final.winnerId !== 'p1' || state.final.rating !== 3) return `final ${JSON.stringify(state.final)}`;
+    state.turn = 7; g.finish();
+    if (state.final.winnerId !== null) return 'no First Founder before the ship is back';
+    state.turn = 12; setCash(state, 'p1', 100); g.finish();
+    return state.final.winnerId === null && state.final.rank.length === 4 && state.final.rating === 0 ? true : 'failure must keep the ranking without a First Founder';
+  });
+  t('Ship messages: [C64] "Aterreu al planeta Irata." / "La nau tornarà d\'aquí a N mesos." at the start (6 in Beginner), "La nau ha tornat!" at the end', () => {
+    const txt = (level) => { const { state } = fresh('ship', level); return EventSystem.landing(state).text; };
+    if (!txt('standard').includes('Aterreu al planeta Irata.') || !txt('standard').includes('La nau tornarà d\'aquí a 12 mesos.')) return txt('standard');
+    if (!txt('beginner').includes('d\'aquí a 6 mesos.')) return txt('beginner');
+    const g = mkGame(); g.newGame({ seed: 'land-msg' });
+    const it = (g.turns.phaseData.items || [])[0];
+    if (g.turns.phase !== 'TURN_START' || !it || it.id !== 'landing') return `round 1 must open with the landing card (phase ${g.turns.phase})`;
+    return EventSystem.shipBack().name === 'La nau ha tornat!' ? true : 'ship back';
   });
 
   /* ---------- saves, conservation, determinism, engine ---------- */
-  t('Save: schema 4 round trip keeps state (store prices, event bag and used flags) and PRNG; schemas 1-3 (old rules) and corrupt saves are refused', () => {
-    if (CONFIG.SCHEMA_VERSION !== 4) return `schema ${CONFIG.SCHEMA_VERSION}`;
+  t('Save: schema 5 round trip keeps state (level, species, land sales, store prices, event bag) and PRNG; schemas 1-4 (old rules) and corrupt saves are refused', () => {
+    if (CONFIG.SCHEMA_VERSION !== 5) return `schema ${CONFIG.SCHEMA_VERSION}`;
     const { state, rng } = fresh('save'); rng.next(); rng.next();
     state.turn = 4; state.phase = 'DEVELOPMENT'; state.storePrice.food = 33; state.events.bag.pirates = 1; state.events.used[13] = 1;
     const text = SaveSystem.serialize(state, rng);
@@ -1063,7 +1213,8 @@ function runSelfTests() {
     if (rng2.next() !== rng.next()) return 'rng stream differs';
     if (back.state.storePrice.food !== 33) return 'store price lost';
     if (back.state.events.bag.pirates !== 1 || back.state.events.used[13] !== 1) return 'event bag / used flags lost';
-    for (const v of [1, 2, 3]) {
+    if (back.state.level !== 'standard' || back.state.players[0].species !== 'mechtron' || !Array.isArray(back.state.landSales)) return 'level / species / land sales lost';
+    for (const v of [1, 2, 3, 4]) {
       const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: v, turn: 3 }));
       if (!old.incompatible || old.reason !== 'old_rules') return `schema ${v}: ${JSON.stringify(old)}`;
     }
@@ -1107,7 +1258,11 @@ function runSelfTests() {
   /* ---------- whole game (real phase code, no DOM rendering) ---------- */
   t('Game: resume mid-walk and mid-declaration continues exactly; pause freezes the walker', () => {
     const tickUntil = (G, pred, max = 200000) => {
-      for (let i = 0; i < max && !pred(); i++) { const ph = G.turns.phase; if (G.turns.phaseData && G.turns.phaseData.skippable && ph && !ph.startsWith('AUCTION_')) G.skipPhase(); G.tick(50); }
+      for (let i = 0; i < max && !pred(); i++) {
+        const ph = G.turns.phase; if (G.turns.phaseData && G.turns.phaseData.skippable && ph && !ph.startsWith('AUCTION_')) G.skipPhase();
+        const sl = G.devSlot(); if (sl && sl.stage === 'ready') G.devStart();
+        G.tick(50);
+      }
       return pred();
     };
     const copy = (G) => { G.snapshotPhase(); const H = mkGame(); H.resume(SaveSystem.deserialize(SaveSystem.serialize(G.state, G.rng))); return H; };
@@ -1130,14 +1285,14 @@ function runSelfTests() {
     return same(g, k) ? audited(g.state) : 'state diverged after resuming the auction';
   });
   t('Game: a full 12-turn autopilot game ends; the same seed gives the same game; ledger, RUCs and result consistent', () => {
-    const play = (seed) => { const g = mkGame(); g.autopilot = true; g.newGame({ seed, difficulty: 'colony' }); for (let n = 0; n < 400000 && g.state.phase !== 'GAME_OVER'; n++) g.tick(50); return g; };
+    const play = (seed) => { const g = mkGame(); g.autopilot = true; g.newGame({ seed, level: 'standard' }); for (let n = 0; n < 400000 && g.state.phase !== 'GAME_OVER'; n++) g.tick(50); return g; };
     const a = play('full-1'); const b = play('full-1');
     if (a.state.phase !== 'GAME_OVER') return `stuck in ${a.state.phase}, turn ${a.state.turn}`;
     const key = (g) => JSON.stringify({ f: g.state.final, h: g.state.history, p: g.state.plots, r: g.rng.getState(), l: g.state.auctionLog });
     if (key(a) !== key(b)) return 'the same seed gave a different game';
-    if (a.state.history.length !== CONFIG.TURNS) return `history ${a.state.history.length}`;
+    if (a.state.history.length !== 12) return `history ${a.state.history.length}`;
     const f = a.state.final;
-    if (f.rank.length !== 4 || f.survives !== (f.combined >= CONFIG.SURVIVAL.combined) || (f.survives ? !f.winnerId : f.winnerId !== null)) return JSON.stringify(f);
+    if (f.rank.length !== 4 || f.rating !== ScoringSystem.rating(f.combined) || (f.rating >= 3 ? !f.winnerId : f.winnerId !== null)) return JSON.stringify(f);
     const trades = a.state.auctionLog.reduce((s, x) => s + x.volume, 0);
     console.log(`SELFTEST full game full-1: colony ${f.combined} cr (${f.survives ? 'success' : 'failure'}), ${trades} units traded, RUCs made ${a.state.rucs.made}, lost ${a.state.rucs.lost}`);
     return audited(a.state);

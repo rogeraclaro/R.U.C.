@@ -1,7 +1,7 @@
 # R.U.C.
 
-Reinterpretació de **M.U.L.E.** (Dani Bunten, 1983): un jugador contra tres rivals IA (Bran, Vela i Nox), 12 torns,
-subhasta contínua en temps real. Fase A ajustada a les regles del M.U.L.E. original de Commodore 64 (joc «Standard» sense
+Reinterpretació de **M.U.L.E.** (Dani Bunten, 1983): un jugador contra tres rivals IA (Bran, Vela i Nox, tots Mechtrons),
+12 torns (6 al nivell Principiant), subhasta contínua en temps real. Fase A ajustada a les regles del M.U.L.E. original de Commodore 64 (joc «Standard» sense
 crystite ni subhastes de terra). HTML, CSS i JavaScript vanilla amb Canvas 2D; cap dependència.
 
 ## Com obrir-lo
@@ -13,13 +13,28 @@ crystite ni subhastes de terra). HTML, CSS i JavaScript vanilla amb Canvas 2D; c
 
 Funciona sense connexió. No hi ha CDN, npm, bundler ni IA en temps d'execució.
 
+## Configuració
+
+- **Espècie** ([codi Atari], [C64]): Mechtron, Gollumer, Packer, Bonzoid, Spheroid, Flapper, Leggite o Humanoid. Només canvien els diners
+  i el temps de torn: **Flapper 1600 cr** i temps ×9/7, **Humanoid 600 cr** i temps ×5/7, la resta 1000 cr i temps normal. Els rivals de
+  l'ordinador són sempre Mechtrons amb 1000 cr. Els dibuixos de les espècies són propis (no hi ha asset); l'Humanoid fa servir el retrat
+  `colonists_strip` del teu color.
+- **Nivell**: **Estàndard** (per defecte, 12 mesos, regles completes) o **Principiant** (6 mesos). Torneig surt desactivat (cal crystite,
+  Fase B). La IA no té nivell de força (l'original no en té): reacció 400–900 ms, error de valoració ±8 %, reserva mínima 3 (`CONFIG.AI`,
+  els antics valors «Colònia»).
+- Principiant ([codi Atari]): 8 menjar i 4 energia per colon; botiga 16 menjar / 16 energia / 0 smithore i 25 RUCs, i cada torn torna a
+  0 smithore i 25 RUCs; sense variació de collita; smithore fix a 50; unitat de temps +2 BTU (×9/7); cursor de terra a 32 fotogrames per
+  parcel·la; un RUC no fuig mai per prémer al lloc equivocat (només avisa); no es pot vendre terra. **Pendent (lot 4)**: el temps de
+  subhasta del Principiant i el bloqueig de tots els venedors al nivell crític.
+
 ## El torn
 
+0. **Inici** ([C64]): el primer torn obre amb «Aterreu al planeta Irata. La nau tornarà d'aquí a 12 mesos.» (6 al Principiant).
 1. **Adjudicació de terra**: cursa en temps real, una sola passada.
 2. **Desenvolupament**, un colon rere l'altre per ordre de patrimoni (del líder a l'últim; al revés si al corral queden 7 RUCs o menys).
    El temps de cada colon depèn del menjar que té a l'inici del seu torn (vegeu més avall).
-   Abans del torn de cada colon (humà o IA) hi ha un 27,5 % (22/80) d'**esdeveniment personal**, un dels 22 de l'original; la targeta
-   surt abans de l'avís d'inici del torn. El teu torn és **a peu**: vegeu més avall.
+   Abans del torn de cada colon (humà o IA) hi ha un 27,5 % (22/80) d'**esdeveniment personal**, un dels 22 de l'original; el text
+   surt a sobre de «Prem el botó per començar». El teu torn és **a peu**: vegeu més avall. Les IA instal·len RUCs i després van al pub.
 3. **Esdeveniment planetari**: un per torn als torns 1–11, tret d'una bossa sense reposició; al torn 12, «La nau ha tornat!». Taques solars,
    pluja àcida, terratrèmol, meteorit i radiació actuen abans de la producció; plaga, pirates i incendi, després de mostrar-la.
 4. **Producció i estat**: consum, malbaratament de la reserva i collita nova (pantalla «Estat del torn»).
@@ -27,34 +42,50 @@ Funciona sense connexió. No hi ha CDN, npm, bundler ni IA en temps d'execució.
 6. **Informe del torn**: la botiga recalcula els preus per oferta i demanda i fabrica RUCs amb el smithore que té (2 per RUC, fins a
    14 al corral, disponibles el torn següent).
 
-Al final, la colònia ha de sumar **60.000 cr** de patrimoni; si no hi arriba, ha fracassat i no hi ha *First Founder* (la classificació es mostra igualment).
+Al final («La nau ha tornat!») la colònia rep una **valoració** ([codi Atari]) = round((patrimoni total − 10.000) / 20.000), entre 0 i 6,
+amb els 7 textos originals traduïts («En conjunt, la colònia ha fracassat... estrepitosament...» fins a «...ha encantat la Federació...»).
+El líder és el ***First Founder*** només si la colònia arriba a **60.000 cr** (valoració ≥ 3) i només al final real de la partida; la
+classificació es mostra sempre.
 Si en acabar un torn no queda cap RUC de menjar (o d'energia) ni cap unitat de menjar (o d'energia) enlloc, la partida s'acaba a l'instant:
 «La colònia ha fracassat per una manca total de menjar!» (o «d'energia»).
 
 ## Desenvolupament a peu
 
-Abans que comenci el teu torn, un avís de **3 s** ("Comença el torn de...") et dona temps a reaccionar: el RUC i el seu rellotge de
-desenvolupament no comencen fins que s'acaba.
+Com al C64, el teu torn no comença sol: surt «**Prem el botó per començar**» (amb l'esdeveniment personal a sobre, si n'hi ha) i el
+rellotge no corre fins que prems Acció, `Enter`, `Espai` o hi fas clic.
 
-El colon apareix al poble (casella central del mapa). Amb les fletxes (o el control tàctil de la dreta del panell) camina en temps real;
+El temps que queda és una **barra vertical** del teu color a la vora dreta del mapa (alçada = unitats que queden).
+
+El colon apareix al poble (casella central del mapa). **Poble** ([C64]): a dalt, la botiga de crystite (tancada, sense porta), i els
+tallers de smithore, energia i menjar; a baix, l'oficina d'assaig (tancada), l'**oficina de terres**, el **pub** i el **corral**, amb el
+rètol «RUCs 100 cr» (el preu actual). A sota del poble, «Els teus diners: N cr». Amb les fletxes (o el control tàctil de la dreta del panell) camina en temps real;
 el rellotge corre sempre, també mentre camines o estàs parat.
 
 **Temps** ([codi Atari], [C64]): `10 + floor(91 × min(1, menjar / necessitat))` unitats de 28 fotogrames PAL (50,125 Hz). Amb prou menjar,
 101 unitats ≈ 56,4 s; sense menjar, 10 unitats ≈ 5,6 s. Es compta el menjar que tens quan comença el teu torn (es menja després, a la
-producció). És igual a totes les dificultats; el factor d'espècie (Flapper 9/7, Humanoid 5/7) està preparat però val 1 mentre no hi hagi espècies.
+producció). Flapper ×9/7 i Humanoid ×5/7 (±2 BTU per unitat); el Principiant hi afegeix 2 BTU.
+
+**Caminar** ([C64]): al mapa 0,667 px/fotograma en horitzontal i 0,333 en vertical sobre una parcel·la de ~32 px del C64 (escalat ×3 a la
+nostra: ~0,96 s per creuar-la en horitzontal, ~1,9 s en vertical); al poble 1,33 px/fotograma en horitzontal. Riu i muntanya
+alenteixen ([codi Atari] 6 / 14 / 21 fotogrames per pas: plana / riu / muntanya). La diagonal és la manera més ràpida de moure's.
 
 - **Corral** i **tallers** de menjar, energia i smithore: el teu colon **es queda a la porta**; camina fins allà i empeny-hi uns
   instants (fregar-la de passada no compta) perquè el RUC entri sol fins al taulell interior (un anell el marca) i torni, una mica
   lent. Un cop compromesa, la visita es fa sencera; seguir empenyent després no torna a cobrar.
 - **Corral**: al taulell compres un RUC. Si hi entres portant-ne un, el retornes: recuperes el **preu sencer del robot**, mai l'equip.
 - **Tallers**: al taulell pagues l'equip (25 / 50 / 75 cr) per al RUC que portes.
+- **Pub** ([codi Atari], [C64]): hi entres i el torn **s'acaba**: guanyes bonificació del torn (50 torns 1–3, 100 torns 4–7, 150 torns 8–11,
+  200 torn 12) + (aleatori 0..255 mod (2 × unitats que queden)); si la suma passa de 255, en cobres 250. «Has guanyat N cr jugant!».
+  Amb un RUC no hi pots entrar: «No s'hi admeten RUCs.» (també a l'oficina de terres).
+- **Oficina de terres** (Estàndard): «Marca la parcel·la per vendre i torna.»; prem Acció sobre una parcel·la teva i torna a l'oficina:
+  queda marcada per vendre («EN VENDA») a la propera subhasta de terres (la subhasta és del lot 4; ara només es desa i es mostra).
 - **Instal·lar**: surt del poble per una vora oberta, camina fins a la **casa** —ara tota la parcel·la teva, no només el centre— i
   prem **Acció**. No és instantani: el RUC puja, se li afegeix l'especialització i torna a baixar (uns 2 s) abans de quedar instal·lat;
   mentrestant no es pot caminar ni tornar a prémer Acció. Si a la parcel·la ja hi havia un RUC, ara et segueix aquell.
 - **Retirar / reequipar**: Acció sobre la casa d'una parcel·la teva sense portar res; el RUC et segueix. Per canviar-ne la producció l'has de dur
   a un taller, pagar l'equip nou i tornar a peu a instal·lar-lo. No hi ha cap botó de panell per comprar, equipar ni instal·lar a distància.
-- **Fugides** ([manual], joc Standard): si prems Acció fora de la casa d'una parcel·la teva portant un RUC, **fuig**; si s'acaba el temps (o
-  acabes el torn) portant-ne un, **fuig**. Es perd a l'instant (no torna al corral, no es retorna res); l'espurneig i la sortida corrents
+- **Fugides** ([manual], joc Standard): si prems Acció fora de la casa d'una parcel·la teva portant un RUC, **fuig** (al Principiant només
+  avisa); si s'acaba el temps (o acabes el torn) portant-ne un, **fuig**. Es perd a l'instant (no torna al corral, no es retorna res); l'espurneig i la sortida corrents
   que es veuen després només són l'animació.
 - Clicar el mapa no instal·la mai res: durant el desenvolupament només mostra la informació de la parcel·la.
 
@@ -64,8 +95,10 @@ producció). És igual a totes les dificultats; el factor d'espècie (Flapper 9/
 |---|---|---|
 | Botons i camps | clic / toc | `Tab` / `Maj+Tab` canvia el focus, `Enter` o `Espai` activa |
 | Adjudicació de terra (cursa) | clic o toc **a qualsevol lloc del mapa**, o el botó «Reclama» | `Enter` o `Espai` |
+| Començar el torn de desenvolupament | clic al mapa o botó «Començar» | `Enter` o `Espai` |
 | Caminar (desenvolupament) | mantén premudes les fletxes en pantalla (panell inferior) | fletxes (en diagonal, dues alhora) |
-| Acció (instal·lar / retirar) | botó «Acció» | `Enter` o `Espai` |
+| Pub / oficina de terres / corral / tallers | camina fins a la porta i empeny-hi uns instants | fletxes |
+| Acció (instal·lar / retirar / marcar parcel·la per vendre) | botó «Acció» | `Enter` o `Espai` |
 | Acabar el torn de desenvolupament | botó «Acabar» (avisa si el RUC fugirà) | `Tab` fins al botó i `Enter` |
 | Subhasta: declaració | botons COMPRADOR / VENEDOR / FORA, o toc a la meitat esquerra / dreta del teu carril | `↑`/`→` venedor, `↓`/`←` comprador, `Espai` fora |
 | Subhasta: preu (després de declarar) | arrossega al teu carril, control vertical o roda | `↑` / `↓` (mantén-ho premut; `Maj` = ×3) |
@@ -82,7 +115,7 @@ rellotge del joc. A la pantalla final, **Repetir llavor** i **Nova llavor**. Amb
 
 ## Desat
 
-Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **4**: inclou la bossa d'esdeveniments planetaris i els esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
+Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **5**: nivell, espècie, parcel·les en venda, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
 **Continuar** al títol reprèn a la fase desada.
 
 «Desa i surt al títol» (menú de pausa) escriu un desat exacte a les fases **represables**: cursa de terra, desenvolupament (posició, RUC que
@@ -90,7 +123,7 @@ portes, rellotge, ordre i esdeveniments ja sortejats) i subhastes (declaració o
 l'últim desat de frontera, perquè tornar-hi a mitja fase podria aplicar-ne els efectes dues vegades. La liquidació del torn queda desada
 a l'estat (`settlement`) i no es torna a executar mai.
 
-**Desats antics:** un desat dels esquemes 1 a 3 (regles anteriors: estocs inicials, preus, temps, patrimoni i esdeveniments) **no es migra**: el joc avisa al títol que
+**Desats antics:** un desat dels esquemes 1 a 4 (regles anteriors: estocs inicials, preus, temps, patrimoni, esdeveniments, dificultats) **no es migra**: el joc avisa al títol que
 és d'una versió anterior amb unes altres regles i l'esborra. Un desat malmès també s'avisa. Cap desat incompatible s'accepta en silenci.
 
 ## Paràmetres d'URL (proves i depuració)
@@ -98,7 +131,7 @@ a l'estat (`settlement`) i no es torna a executar mai.
 - `?test=1` executa `runSelfTests()` i mostra PASS/FAIL sense iniciar cap partida (detall i resum de la partida completa a la `console`).
 - `?debug=1` barra inferior amb fase, llavor, FPS, estocs, decisions IA i els botons **Següent fase**, **+1000 cr** i **Força esdeveniment**
   (aplica només aquell esdeveniment; els individuals, al jugador).
-- `?autoplay=1` el jugador humà el controla la mateixa IA (desenvolupament instantani, com les IA de l'original).
+- `?autoplay=1` el jugador humà el controla la mateixa IA (desenvolupament instantani, com les IA de l'original); `&level=beginner` per al Principiant.
 
 ## Estructura
 
@@ -109,9 +142,9 @@ ruc/
 ├── js/               scripts clàssics (no mòduls ES, perquè funcioni amb file://)
 │   ├── core/         config.js (CONFIG, FEATURES, enums, RESOURCE_DEFS, EVENT_DEFS…), rng.js, assets.js
 │   ├── state/        models de dades: Plot, PlayerState, StoreState, ResourceLedger + RucAudit, GameState
-│   ├── systems/      lògica pura: torn, botiga, terra, producció, consum, liquidació, esdeveniments,
-│   │                 puntuació, desat, subhasta, IA, ordre i caminada de desenvolupament (poble)
-│   ├── ui/           hud.js (colors, formats, Hud), overlays.js, input.js, audio.js, renderer.js
+│   ├── systems/      lògica pura: torn, botiga, terra (i oficina de terres), producció, consum, liquidació, esdeveniments,
+│   │                 puntuació, pub, desat, subhasta, IA, ordre i caminada de desenvolupament (poble)
+│   ├── ui/           hud.js (colors, formats, Hud), species-art.js, overlays.js, input.js, audio.js, renderer.js
 │   ├── screens/      title, setup, map, production, report, auction, gameover
 │   ├── tests.js      runSelfTests (?test=1)
 │   └── game.js       Game + arrencada
@@ -166,24 +199,22 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
   a qualsevol lloc del mapa, `Enter` o `Espai`. IA: amb el seu propi temps de reacció.
 - Cada colon reclama com a màxim **una** parcel·la per torn. Al panell lateral es veu «a la cursa», «✔ parcel·la #N» o
   «✕ sense parcel·la», i la parcel·la reclamada fa un flaix amb el color i la forma del colon.
-- Velocitat per dificultat (`CONFIG.DIFFICULTY[*].landMsPerPlot`): **Relaxada 500 ms**, **Colònia 400 ms**, **Implacable 300 ms** per
-  parcel·la lliure. «Reduir moviment» només treu la pulsació del marc; **no** altera la velocitat.
-- **Pausa de reclamació** (`CONFIG.LAND.landClaimPauseMs` = **2000 ms**, igual per a totes les dificultats): després de cada reclamació
-  el cursor **desapareix i queda aturat** 2 s. Ningú no pot reclamar durant la pausa (els premuts es perden i el botó queda desactivat),
+- Velocitat ([C64] Estàndard: 16 fotogrames PAL per parcel·la lliure = **320 ms**; [codi Atari] Principiant: 32 fotogrames = **640 ms**;
+  `CONFIG.LEVELS[*].cursorFrames`). «Reduir moviment» només treu la pulsació del marc; **no** altera la velocitat.
+- **Pausa de reclamació** ([codi Atari] 4 passos del cursor: Estàndard 64 fotogrames = **1280 ms**, com els ~1,28 s mesurats al C64;
+  Principiant **2550 ms**): després de cada reclamació el cursor **desapareix i queda aturat**. Ningú no pot reclamar durant la pausa (els premuts es perden i el botó queda desactivat),
   la parcel·la reclamada fa el flaix i el recorregut continua a la parcel·la **següent** a la reclamada, amb una espera completa.
   Si després d'una reclamació ja no queda cap colon que pugui reclamar (tots en tenen, o no queden parcel·les lliures), la fase s'acaba
   just després del flaix, sense esperar la pausa.
-- **Origen dels valors:** ~0,5 s per parcel·la i ~2,1 s de pausa sorgeixen de mesurar fotograma a fotograma l'original de C64 (nivell
-  Principiant). Aquí queden en 500/400/300 ms (Relaxada/Colònia/Implacable) i 2000 ms perquè les dificultats difereixin i els temps siguin
-  múltiples exactes del pas de 10 ms del rellotge.
+- Els temps es passen de fotogrames PAL a ms i s'arrodoneixen al pas de 10 ms del rellotge.
 - Determinisme: el cursor avança amb el **rellotge del joc** en passos fixos de 10 ms (`CONFIG.LAND.stepMs`) i les accions de l'humà porten
   la marca de temps d'aquest rellotge. La mateixa llavor amb les mateixes accions amb marca de temps dona el mateix resultat, sigui quina
   sigui la taxa de fotogrames. La pausa del joc (Esc) congela el cursor, la pausa de reclamació i tots els temporitzadors de la IA; la pausa
   de reclamació i els temporitzadors de la IA es desen a `phaseData.land`, de manera que desar i recarregar a mig cursa (també a mitja pausa)
   reprèn exactament.
-- IA: tria l'objectiu amb la valoració habitual (necessitats, terreny, riquesa, adjacència, ±error de valoració segons dificultat) només entre les
+- IA: tria l'objectiu amb la valoració habitual (necessitats, terreny, riquesa, adjacència, ±8 % d'error de valoració) només entre les
   parcel·les lliures **des del cursor endavant** (l'ordre de recorregut és públic) i prem a l'hora prevista d'arribada, desplaçada pel seu
-  temps de reacció (Relaxada 700–1300 ms, Colònia 400–900, Implacable 180–500) extret del PRNG sembrat. Si l'objectiu li'l prenen o el cursor
+  temps de reacció (400–900 ms) extret del PRNG sembrat. Si l'objectiu li'l prenen o el cursor
   el sobrepassa, en tria un altre d'endavant. Un premut és **sempre** sobre la parcel·la que hi ha sota el cursor en aquell moment: si la IA
   s'avança o es retarda, es queda la veïna. Durant la pausa de reclamació els temporitzadors de la IA **no corren**: s'esborren i es tornen a
   planificar (amb un temps de reacció nou) quan el cursor torna, de manera que la IA no guanya cap premut anticipat.
@@ -209,8 +240,17 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | Corba d'aprenentatge: +1 a cada parcel·la per cada grup complet de 3 parcel·les pròpies del mateix bé, encara que no es toquin | manual | `learningBonus` |
 | Només els RUCs no energètics gasten 1 energia de la reserva; els d'energia s'autoalimenten; l'energia nova no alimenta res fins al torn següent | manual | `ProductionSystem.activation` |
 | La fam no costa diners: només redueix el temps de desenvolupament | manual (el menjar determina el temps) | deute eliminat |
-| Inventari inicial de cada colon: 4 menjar, 2 energia | codi Atari, C64 | `CONFIG.START_INV` |
-| Botiga inicial 8 menjar / 8 energia / 8 smithore; 14 RUCs al corral (el manual en diu 16) | codi Atari, C64 | `CONFIG.STORE_START`, `RUC_START` |
+| Inventari inicial de cada colon: 4 menjar, 2 energia (Principiant 8 / 4) | codi Atari, C64 | `CONFIG.START_INV`, `CONFIG.LEVELS` |
+| Botiga inicial 8 menjar / 8 energia / 8 smithore; 14 RUCs al corral (el manual en diu 16); Principiant 16 / 16 / 0 i 25 RUCs, restablerts cada torn | codi Atari, C64 | `CONFIG.STORE_START`, `RUC_START`, `levelRules`, `StoreSystem.betweenTurns` |
+| Nivells: Principiant 6 torns, Estàndard 12; Torneig desactivat | codi Atari, C64 | `CONFIG.LEVELS`, `lastRound` |
+| Espècies: Flapper 1600 cr i +2 BTU per unitat, Humanoid 600 cr i −2 BTU, la resta 1000 cr; ordinadors = Mechtrons amb 1000 cr | codi Atari, C64 | `CONFIG.SPECIES`, `ConsumptionSystem.unitFrames` |
+| Pub: bonificació 50/100/150/200 + (aleatori 0..255 mod 2 × unitats que queden), 250 si la suma passa de 255; acaba el torn | codi Atari, C64 | `PubSystem`, `DevWalk.enter` |
+| IA: instal·la mentre li queden ≥ 35 unitats (cada instal·lació costa 25 + 2 × distància al poble) i després va al pub si en queden ≥ 3 | codi Atari | `AISystem.turn` |
+| «Prem el botó per començar» i barra de temps vertical del color del jugador a la dreta del mapa | C64 | `Game.devStart`, `MapScreen.timeBar` |
+| Poble: crystite (tancat) · smithore · energia · menjar / assaig (tancat) · oficina de terres · pub · corral «RUCs 100 cr»; «Els teus diners» a sota | C64 | `TOWN`, `MapScreen.drawTown` |
+| Cursor de terra 16 fotogrames per parcel·la (Principiant 32) i pausa de 4 passos després d'una reclamació | C64, codi Atari | `LandRace.create` |
+| Caminar: mapa 0,667 / 0,333 px per fotograma (h / v) sobre parcel·les de 32 px, poble 1,33 px per fotograma (h); terreny 6 / 14 / 21 fotogrames per pas | C64, codi Atari | `CONFIG.WALK`, `DevWalk.speed` |
+| Valoració de la colònia round((total − 10.000) / 20.000) a 0..6 amb els 7 textos; First Founder només si ≥ 3 i al final | codi Atari | `ScoringSystem.rating`, `COLONY_RATINGS`, `Game.finish` |
 | Entre torns la botiga fabrica min(14 − corral, smithore / 2) RUCs, 2 smithore cadascun; corral màxim 14; sense reposició gratuïta | codi Atari | `StoreSystem.betweenTurns`, `CONFIG.RUC_MAX` |
 | Equip: menjar 25, energia 50, smithore 75 | manual, C64 | `CONFIG.MODULE_COST` |
 | Menjar necessari per torn: 3 (torns 1-4), 4 (5-8), 5 (9-12) | codi Atari, C64 | `CONFIG.FOOD_NEED` |
@@ -239,7 +279,7 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | Meteorit: parcel·la que no sigui poble ni riu; en destrueix el RUC i hi deixa un dipòsit de crystite (`hiddenDeposit` = 4, per a la Fase B); el text del crystite només surt al Torneig | codi Atari | `EventSystem.build` |
 | Radiació (abans de la producció): fuig un RUC del 1r o 2n; plaga (després): una parcel·la de menjar amb producció del 1r o 2n la perd tota | codi Atari | `EventSystem.build`, `scanPlots` |
 | Pirates (Standard, després de la producció): tot el smithore dels colons **i de la botiga**, i la producció de smithore del torn; incendi: la botiga es queda sense menjar, energia ni smithore | codi Atari, manual | `EventSystem.build` |
-| Parcel·la = 500; objectiu de colònia 60.000 sense mínim per colon; sense First Founder si fracassa | manual | `ScoringSystem`, `Game.finish` |
+| Parcel·la = 500; objectiu de colònia 60.000 (valoració ≥ 3) sense mínim per colon | manual, codi Atari | `ScoringSystem`, `Game.finish` |
 | Patrimoni: efectiu + béns al preu P de la botiga + 500 per parcel·la + per cada RUC instal·lat el cost de l'equip + 35 | codi Atari | `ScoringSystem.breakdown`, `CONFIG.RUC_WORTH` |
 | Fracàs immediat si no hi ha cap RUC de menjar (o d'energia) i no en queda cap unitat enlloc (colons + botiga) | codi Atari | `ScoringSystem.colonyFailure`, fase `NEXT` |
 
@@ -263,17 +303,19 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | Retorn d'un RUC retirat d'una parcel·la | manual: «retorna'l al corral per 100 $» | es retorna el preu que es va pagar per aquell robot | mitjana | Retornar al corral un RUC comprat a un altre preu |
 | RUC sense equipar premut sobre la casa | no consta | no s'instal·la i no fuig (avís) | baixa | Provar-ho en emulador |
 | Empat de patrimoni en l'ordre de desenvolupament i a la subhasta | no consta | ordre de jugador estable; a la subhasta, temps d'espera i clau sembrada | baixa | — |
-| Velocitats de caminar, alentiment de riu/muntanya, geometria del poble | manual: riu i muntanya alenteixen, la diagonal és més ràpida | 0,12 px/ms al mapa (50 % a riu/muntanya), 0,2 px/ms al poble (retocat a 2/3 de l'anterior després de jugar-hi); poble amb carrer i passatge | baixa | Cronometrar recorreguts en emulador |
-| Instal·lació i fugida animades (pujada/afegit/baixada del RUC; espurneig i sortida corrents); casa = tota la parcel·la; avís de 3 s abans del torn humà | no són regles del C64, són decisions de disseny pròpies | 1800 ms d'instal·lació, 400+900 ms de fugida, avís 3000 ms (`CONFIG.WALK.installMs/fleeShuffleMs/fleeRunMs`, `CONFIG.DEV.countdownMs`) | — (no aplica: no és una afirmació de fidelitat) | — |
+| Velocitat vertical al poble i geometria del poble | C64: només s'ha mesurat l'horitzontal (1,33 px/fotograma) | 0,667 px/fotograma en vertical (la meitat, com al mapa); carrer i passatge propis amb l'ordre d'edificis del C64 | baixa | Cronometrar recorreguts verticals al poble en emulador |
+| «No s'hi admeten RUCs» al pub i a l'oficina de terres | C64: la cadena «NO MULES ALLOWED» existeix, però no se sap a quins edificis surt | no s'hi pot entrar amb un RUC (no fuig) | baixa | Entrar al pub amb un RUC en emulador |
+| Rellotge a l'oficina de terres | manual: el temps s'atura mentre marques la parcel·la | el rellotge continua corrent | baixa | Comprovar-ho en emulador |
+| Fi del torn portant un RUC al Principiant | codi Atari: només documenta que un premut equivocat «només avisa» | fuig igual que a l'Estàndard | baixa | Esgotar el temps amb un RUC al Principiant |
+| Valors de la IA (reacció 400–900 ms, error ±8 %, reserva 3) | l'original no té nivells de IA i no se n'ha transcrit el comportament de subhasta | antics valors «Colònia» (`CONFIG.AI`) | — | Lot 4 (subhastes) |
+| Instal·lació i fugida animades (pujada/afegit/baixada del RUC; espurneig i sortida corrents); casa = tota la parcel·la | no són regles del C64, són decisions de disseny pròpies | 1800 ms d'instal·lació, 400+900 ms de fugida (`CONFIG.WALK.installMs/fleeShuffleMs/fleeRunMs`) | — (no aplica: no és una afirmació de fidelitat) | — |
 | Botiga/corral: el colon es queda a la porta i només el RUC camina fins al taulell i torna | no és una regla del C64, és una decisió de disseny pròpia | cal empènyer 350 ms a la porta perquè comprometi la visita; 2200 ms de viatge del RUC (`CONFIG.WALK.doorHoldMs/visitMs`) | — (no aplica) | — |
 | Separació de marcadors després de cada unitat | l'original manté la unitat a unitat mentre les línies es toquen | R.U.C. separa 2 passos després de cada unitat i cal tornar a creuar 0,5 s | — | Decidir si es canvia (ajornat, vegeu sota) |
 
 ### Pendents de Fase A (no implementats, sense evidència suficient)
 
-- **Pub**: el manual confirma que acaba el torn i paga més com més temps queda, però no la fórmula. No s'ha implementat; «Acabar» no paga res.
-- **Espècies i hàndicaps**: Flapper (més diners i temps) i Humanoid (menys) consten al manual sense xifres (les de +600/−400 són d'una font
-  comunitària); les altres sis espècies no tenen atributs documentats. Pendent (lot 3 del pla de fidelitat). El temps ja té el punt
-  d'enganxament per al factor d'espècie.
+- **Subhastes de terra** (lot 4): les parcel·les marcades a l'oficina de terres es desen (`state.landSales`) però encara no es subhasten.
+- **Principiant a les subhastes** (lot 4): temps de subhasta (ATU 50) i bloqueig de tots els venedors al nivell crític.
 
 ### Ajornat (fora d'aquest encàrrec)
 

@@ -21,7 +21,8 @@ const ProductionSystem = {
    * [Atari code] random variation: units = mean + round(F x binomial), Standard F = 0.5 -> -1/0/+1 at ~16/68/16 %, +-2 at ~0.1 % each
    * (see binomialStep). One seeded draw per plot; the result is then clamped to 0..8.
    */
-  variation(rng) { return binomialStep(rng, CONFIG.PRODUCTION.varAmp); },
+  /** Level amplitude ([Atari code] Beginner 0: no draw at all, so the PRNG stream is not used). */
+  variation(state, rng) { const F = levelRules(state).varAmp; return F ? binomialStep(rng, F) : 0; },
   clampUnits(u) { return clamp(u, CONFIG.PRODUCTION.min, CONFIG.PRODUCTION.max); },
   /**
    * [Atari code] "before production" planetary events change each plot's final production (after variation and the 0..8 clamp):
@@ -47,7 +48,7 @@ const ProductionSystem = {
   /** Real yield of a powered plot this turn: one seeded draw per plot. */
   rollYield(state, plot, rng) {
     if (!plot.ruc || !this.canProduce(plot, plot.ruc.module)) return 0;
-    return this.applyEvents(state, plot, this.clampUnits(this.meanYield(state, plot) + this.variation(rng)));
+    return this.applyEvents(state, plot, this.clampUnits(this.meanYield(state, plot) + this.variation(state, rng)));
   },
   /**
    * [manual] Food and Smithore RUCs each need one unit of energy left over from the previous turn; energy RUCs power themselves, and
