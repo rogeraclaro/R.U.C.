@@ -1400,6 +1400,17 @@ function runSelfTests() {
     if (g.state.phase !== 'GAME_OVER' || !f || f.survives || f.winnerId !== null || f.lack !== 'food') return `final ${JSON.stringify(f)}`;
     return GameOverScreen.lackText(f.lack) === 'La colònia ha fracassat per una manca total de menjar!' ? true : GameOverScreen.lackText(f.lack);
   });
+  t('Turn report: every event of the round gets its own line (1 column up to 3, then 2 columns), all above the continue button', () => {
+    for (let n = 0; n <= 10; n++) {
+      const slots = ReportScreen.eventSlots(n);
+      if (slots.length !== n) return `${n} events -> ${slots.length} slots`;
+      const keys = new Set(slots.map((sl) => `${sl.x},${sl.y}`));
+      if (keys.size !== n) return `${n} events: overlapping slots`;
+      if (slots.some((sl) => sl.y < 556 || sl.y + sl.size > 640 || sl.x + sl.w > 1240)) return `${n} events: ${JSON.stringify(slots)}`;
+      if (n <= 3 && slots.some((sl) => sl.x !== 70)) return `${n} events must stay in one column`;
+    }
+    return true;
+  });
   t('Colony rating: [Atari code] round((total - 10000) / 20000) clamped 0..6, with the 7 original texts in Catalan', () => {
     const got = [0, 9999, 19999, 20000, 39999, 40000, 59999, 60000, 79999, 80000, 100000, 119999, 120000, 900000].map((v) => ScoringSystem.rating(v)).join();
     if (got !== '0,0,0,1,1,2,2,3,3,4,5,5,6,6') return `ratings ${got}`;

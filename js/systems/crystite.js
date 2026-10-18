@@ -60,8 +60,6 @@ const CrystiteSystem = {
     const p = state.plots[plotId];
     return state.crystite.known.reduce((best, k, id) => (k !== null && k >= 2 ? Math.max(best, k - this.dist(state.plots[id], p)) : best), 0);
   },
-  /** Plot rating bonus for the computers' land choices: known (or deduced) MEDIUM / HIGH crystite. [PROVISIONAL] weight 1.5 per level. */
-  rating(state, plot) { const v = state.crystite ? this.deduced(state, plot.id) : 0; return v >= 2 ? v * 1.5 : 0; },
   /**
    * [Atari code] $3868-$38E1 computer assay (Tournament only), after its installs and before the pub: skipped once >= 3 HIGH plots
    * are known; candidates are its own plots, then free plots, never river / town / known ones, the highest deduced value first; each

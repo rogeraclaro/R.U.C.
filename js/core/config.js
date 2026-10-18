@@ -326,9 +326,9 @@ const INDIVIDUAL_EVENT_IDS = Object.freeze(['package', 'traveler', 'glac_elves',
   'bat_lizard', 'lost_plot', 'extra_plot']);
 
 const AI_PROFILES = deepFreeze({
-  conservative: { label: 'conservador', reserveTurns: 2, margin: 10, extremeGuard: true, prefers: 'food' },
-  industrial: { label: 'industrial', reserveTurns: 1, margin: 18, extremeGuard: false, prefers: 'smithore' },
-  opportunist: { label: 'oportunista', reserveTurns: 1, margin: 25, extremeGuard: false, prefers: 'energy' }
+  conservative: { label: 'conservador', margin: 10, extremeGuard: true },
+  industrial: { label: 'industrial', margin: 18, extremeGuard: false },
+  opportunist: { label: 'oportunista', margin: 25, extremeGuard: false }
 });
 
 const ASSET_LIST = Object.freeze([

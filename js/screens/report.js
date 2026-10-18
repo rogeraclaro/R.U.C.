@@ -63,8 +63,18 @@ class ReportScreen {
     enabledResources(s).forEach((d, i) => r.text(`${d.label}: ${s.store.stock[d.id]} u · preu ${StoreSystem.price(s, d)} cr (compra ${StoreSystem.bid(s, d)} · ven ${StoreSystem.ask(s, d)})`, 760, 432 + i * 26, { size: 16, maxW: 460 }));
     const surv = ScoringSystem.survival(s);
     r.text(`Patrimoni de la colònia: ${surv.combined} cr (cal ${surv.needCombined} al final del torn ${lastRound(s)})`, 70, 530, { size: 18, color: surv.survives ? COL.good : COL.amber, maxW: 1100 });
-    (s.event && s.event.items || []).slice(0, 3).forEach((ev, i) => r.text(`${ev.scope === 'planet' ? 'Planetari' : `Individual (${ev.targetId ? playerById(s, ev.targetId).name : '?'})`}: ${ev.text}`, 70, 566 + i * 24, { size: 16, color: COL.dim, maxW: 1140, fit: true }));
+    const events = (s.event && s.event.items) || []; const slots = ReportScreen.eventSlots(events.length);
+    events.forEach((ev, i) => r.text(`${ev.scope === 'planet' ? 'Planetari' : `Individual (${ev.targetId ? playerById(s, ev.targetId).name : '?'})`}: ${ev.text}`, slots[i].x, slots[i].y, { size: slots[i].size, color: COL.dim, maxW: slots[i].w, fit: true }));
     if (!ReportScreen.drawWait(game, r)) r.button('rep-next', s.turn >= lastRound(s) ? 'Veure el resultat final' : 'Torn següent', 470, 646, 340, 52, { primary: true, size: 20, onClick: () => game.skipPhase() });
+  }
+  /**
+   * Where each of the round's `n` events goes, between the colony line and the continue button (y 566..640): one full-width
+   * column up to 3, then two columns filled top to bottom; past 6 the rows (and the font) get tighter so none is hidden.
+   */
+  static eventSlots(n) {
+    const cols = n <= 3 ? 1 : 2; const rows = Math.ceil(n / cols);
+    const rowH = Math.min(24, Math.floor(72 / Math.max(1, rows))); const size = Math.min(16, rowH - 2); const w = cols === 1 ? 1140 : 560;
+    return Array.from({ length: n }, (_, i) => ({ x: 70 + Math.floor(i / rows) * 580, y: 566 + (i % rows) * rowH, w, size }));
   }
   /**
    * [Atari code] "PRESS ALL PLAYER BUTTONS TO GO ON." with two or more humans: who has pressed, and the time left (Game.handOver).
