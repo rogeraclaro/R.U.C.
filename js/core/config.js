@@ -184,15 +184,19 @@ const CONFIG = deepFreeze({
   SHAPES: ['circle', 'square', 'triangle', 'diamond'],
   AI_NAMES: [
     { name: 'Bran', profile: 'conservative' }, { name: 'Vela', profile: 'industrial' },
-    { name: 'Nox', profile: 'opportunist' }
+    { name: 'Nox', profile: 'opportunist' }, { name: 'Iris', profile: 'industrial' }
   ],
+  // [Atari code] waitPlayersButtons ($308A): "PRESS ALL PLAYER BUTTONS TO GO ON" waits for every human, or 255 x 4 = 1020 jiffies
+  // (~17 s); the computer demo (no humans) auto-advances after 2 x 255 jiffies (~8.5 s) and loops forever.
+  HANDOVER: { timeoutMs: 17000, demoMs: 8500 },
   // The key stays the same so an old (schema 1-2) save is detected and refused with an explicit message.
   // Schema 3: original start stocks, store price P in the state, new food/time/score rules.
   // Schema 4: the 22 original personal events (used flags) and the planetary event bag (state.events).
   // Schema 5: game level (state.level replaces difficulty), species, land sales, original land/walk pacing.
   // Schema 6: original auction timing, continuous trading and critical levels; land auctions (state.landAuction, LAND_AUCTION phase).
   // Schema 7: the Mountain Wampus in the walk. Schema 8: Tournament (state.crystite: deposits, computers' known map, assays).
-  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 8, MAX_DT_MS: 50
+  // Schema 9: 1-4 human seats and the computer demo (player.keys: the human's control layout, null for a computer).
+  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 9, MAX_DT_MS: 50
 });
 
 /** The rules of the state's level: CONFIG.LEVELS entry over the Standard defaults. */

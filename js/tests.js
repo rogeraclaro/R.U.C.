@@ -1462,8 +1462,8 @@ function runSelfTests() {
   });
 
   /* ---------- saves, conservation, determinism, engine ---------- */
-  t('Save: schema 8 round trip keeps state (level, species, land sales, land-auction prices, store prices, event bag) and PRNG; schemas 1-7 (old rules) and corrupt saves are refused', () => {
-    if (CONFIG.SCHEMA_VERSION !== 8) return `schema ${CONFIG.SCHEMA_VERSION}`;
+  t('Save: schema 9 round trip keeps state (level, species, land sales, land-auction prices, store prices, event bag) and PRNG; schemas 1-8 (old rules) and corrupt saves are refused', () => {
+    if (CONFIG.SCHEMA_VERSION !== 9) return `schema ${CONFIG.SCHEMA_VERSION}`;
     const { state, rng } = fresh('save'); rng.next(); rng.next();
     state.turn = 4; state.phase = 'DEVELOPMENT'; state.storePrice.food = 33; state.events.bag.pirates = 1; state.events.used[13] = 1; state.landAuction.lastAvg = 222;
     const text = SaveSystem.serialize(state, rng);
@@ -1476,7 +1476,7 @@ function runSelfTests() {
     if (back.state.events.bag.pirates !== 1 || back.state.events.used[13] !== 1) return 'event bag / used flags lost';
     if (back.state.level !== 'standard' || back.state.players[0].species !== 'mechtron' || !Array.isArray(back.state.landSales)) return 'level / species / land sales lost';
     if (back.state.landAuction.lastAvg !== 222) return 'land-auction price lost';
-    for (const v of [1, 2, 3, 4, 5, 6, 7]) {
+    for (const v of [1, 2, 3, 4, 5, 6, 7, 8]) {
       const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: v, turn: 3 }));
       if (!old.incompatible || old.reason !== 'old_rules') return `schema ${v}: ${JSON.stringify(old)}`;
     }
@@ -1945,6 +1945,180 @@ function runSelfTests() {
     return audited(a.state);
   });
 
+  /* ---------- Batch 9: 1-4 human players on one machine, computer demo ---------- */
+  const two = [{ name: 'Ada', colorId: 'cyan', species: 'flapper' }, { name: 'Bo', colorId: 'coral', species: 'humanoid' }];
+  /** A game with these human seats (empty list: the computer demo). */
+  const mpGame = (seed, humans = two, level = 'standard') => { const g = mkGame(); g.newGame({ seed, level, humans }); return g; };
+  /** Advances a game with several humans: every human presses on the hand-over screens, human turns start and end at once. */
+  const drive = (G, pred, max = 200000) => {
+    for (let i = 0; i < max && !pred(); i++) {
+      const pd = G.turns.phaseData; const ph = G.turns.phase;
+      if (pd && pd.wait) G.humanIds().forEach((id) => G.playerButton(id));
+      else if (pd && pd.skippable && ph && !ph.startsWith('AUCTION_')) G.skipPhase();
+      const sl = G.devSlot(); if (sl && sl.stage === 'ready') G.devStart(); else if (G.humanWalk()) G.devFinish();
+      G.tick(50);
+    }
+    return pred();
+  };
+  const key = (code, k = code) => ({ code, key: k, repeat: false });
+  t('Seats: 2 humans take the first seats (own name, colour, species, keys); the computers fill the rest as Mechtrons; colours stay unique', () => {
+    const { state } = GameState.create({ seed: 'seats', humans: [two[0], { name: 'Bo', colorId: 'cyan', species: 'humanoid' }] });
+    const ps = state.players;
+    const sig = ps.map((p) => `${p.id}:${p.name}:${p.isHuman ? 'H' : 'C'}:${colorIdOf(p.color)}:${p.species}:${p.keys}:${p.shape}`).join(' ');
+    if (sig !== 'p0:Ada:H:cyan:flapper:0:circle p1:Bo:H:yellow:humanoid:1:square p2:Bran:C:coral:mechtron:null:triangle p3:Vela:C:violet:mechtron:null:diamond') return sig;
+    if (ps[0].cash !== 1600 || ps[1].cash !== 600 || ps[2].aiProfile !== 'conservative') return 'species cash / profile';
+    const four = GameState.create({ seed: 'seats', humans: [two[0], two[1], { name: 'C' }, { name: 'D' }] }).state.players;
+    if (four.some((p) => !p.isHuman) || four.map((p) => p.keys).join() !== '0,1,2,3' || new Set(four.map((p) => p.color)).size !== 4) return 'four humans';
+    const demo = GameState.create({ seed: 'seats', humans: [] }).state.players;
+    if (demo.map((p) => `${p.name}${p.isHuman ? 'H' : ''}`).join() !== 'Bran,Vela,Nox,Iris') return demo.map((p) => p.name).join();
+    // One human: exactly the state of the classic setup (the determinism lines depend on it).
+    const a = GameState.create({ seed: 'one', playerName: 'Roger', colorId: 'cyan', species: 'flapper' }).state;
+    const b = GameState.create({ seed: 'one', humans: [{ name: 'Roger', colorId: 'cyan', species: 'flapper' }] }).state;
+    return JSON.stringify(a) === JSON.stringify(b) ? true : 'one-human state differs';
+  });
+  t('Controls: P1 arrows + Enter/Space, P2 W A S D + Q, P3 I J K L + U, P4 keypad 8 4 5 6 (2) + 0', () => {
+    const m = (c) => { const x = PlayerControls.match(c); return x ? `${x.seat}${x.action[0]}` : '-'; };
+    const got = ['ArrowUp', 'Enter', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyI', 'KeyJ', 'KeyK', 'KeyL', 'KeyU', 'Numpad8', 'Numpad4', 'Numpad5', 'Numpad2', 'Numpad6', 'Numpad0', 'KeyZ'].map(m).join(' ');
+    if (got !== '0u 0b 0b 1u 1l 1d 1r 1b 2u 2l 2d 2r 2b 3u 3l 3d 3d 3r 3b -') return got;
+    const d = PlayerControls.dirs(new Set(['KeyW', 'KeyD', 'ArrowDown']), 1);
+    return d.x === 1 && d.y === -1 ? true : JSON.stringify(d);
+  });
+  t('Land grant (2 humans): both buttons in the same step -> one claim by the tie rule; the other human claims a later plot', () => {
+    const g = mpGame('mp-land');
+    if (!drive(g, () => g.turns.phase === 'LAND_GRANT' && g.landRace().cursor >= 0)) return `stuck in ${g.turns.phase}`;
+    const land = g.landRace(); const first = land.cursor;
+    g.humanClaim(); if (!g.onPlayerKey(key('KeyQ', 'q'))) return 'P2 button not taken';
+    if (land.inputs.map((i) => i.pid).join() !== 'p0,p1') return `inputs ${JSON.stringify(land.inputs)}`;
+    g.tick(50);
+    const s = g.state; const worth = (id) => ScoringSystem.netWorth(s, playerById(s, id));
+    const want = worth('p0') !== worth('p1') ? (worth('p0') < worth('p1') ? 'p0' : 'p1') : land.tieOrder.find((id) => id === 'p0' || id === 'p1');
+    if (land.claimed[want] !== first || Object.keys(land.claimed).length !== 1) return `claimed ${JSON.stringify(land.claimed)} want ${want}`;
+    const other = want === 'p0' ? 'p1' : 'p0';
+    if (!drive(g, () => land.cursor >= 0 && LandRace.canClaim(land, other), 4000)) return 'the cursor never came back';
+    g.playerButton(other); g.tick(50);
+    return land.claimed[other] !== undefined && land.claimed[other] > first ? true : `other ${JSON.stringify(land.claimed)}`;
+  });
+  t('Auction (2 humans): each moves his own marker with his own keys at the same time; they trade with each other', () => {
+    const g = mpGame('mp-auc');
+    if (!drive(g, () => g.turns.phase === 'AUCTION_food' && g.rt.auction && g.rt.auction.engine.canDeclare())) return `stuck in ${g.turns.phase}`;
+    const e = g.rt.auction.engine; const s = g.state;
+    setInv(s, 'p1', 'food', 12); setCash(s, 'p0', 2000);
+    g.auctionRole(ROLE.BUYER); g.onPlayerKey(key('KeyW', 'w')); // P1 buyer (arrows / buttons), P2 seller (W = up)
+    if (e.entry('p0').role !== ROLE.BUYER || e.entry('p1').role !== ROLE.SELLER) return `roles ${e.entry('p0').role}/${e.entry('p1').role}`;
+    if (!drive(g, () => e.stage === 'trade', 2000)) return 'no trade stage';
+    const ask = StoreSystem.ask(s, e.market); const bid = StoreSystem.bid(s, e.market); const mid = (ask + bid) / 2;
+    const p1Start = e.entry('p1').price; const p0Start = e.entry('p0').price;
+    g.input.keys.add('KeyS'); g.input.keys.add('ArrowUp'); g.fastForward(500);
+    if (!(e.entry('p1').price < p1Start && e.entry('p0').price > p0Start)) return `both should move: p0 ${p0Start}->${e.entry('p0').price}, p1 ${p1Start}->${e.entry('p1').price}`;
+    g.input.keys.delete('ArrowUp');
+    for (let i = 0; i < 200 && e.entry('p1').price > mid; i++) g.tick(50);
+    g.input.keys.delete('KeyS'); g.input.keys.add('ArrowUp');
+    for (let i = 0; i < 400 && !e.trades.some((x) => x.buyer === 'p0' && x.seller === 'p1') && !e.ended; i++) g.tick(50);
+    g.input.keys.delete('ArrowUp');
+    return e.trades.some((x) => x.buyer === 'p0' && x.seller === 'p1') ? audited(s) : `no human-human trade: ${JSON.stringify(e.trades.slice(0, 3))}`;
+  });
+  t('Land auction (2 humans): both bidders raise their own markers with their own keys', () => {
+    const g = mpGame('mp-la');
+    if (!drive(g, () => g.turns.phase === 'LAND_GRANT')) return 'no land grant';
+    const la = LandAuction.create(g.state, g.rng, ['p2', 'p3'], { colony: 1 });
+    g.turns.phase = 'LAND_AUCTION'; g.turns.phaseData = { landAuction: la }; g.setScreen('landAuction');
+    for (let i = 0; i < 400 && la.stage !== 'bid'; i++) g.tick(50);
+    if (la.stage !== 'bid') return `stage ${la.stage}`;
+    const a = la.bids.p0.price; const b = la.bids.p1.price;
+    g.input.keys.add('ArrowUp'); g.input.keys.add('KeyW'); g.fastForward(1000); g.input.keys.delete('ArrowUp'); g.input.keys.delete('KeyW');
+    return la.bids.p0.price > a && la.bids.p1.price > b ? true : `bids ${a}->${la.bids.p0.price}, ${b}->${la.bids.p1.price}`;
+  });
+  t('Collusion (Tournament, 2 humans): P1 Enter and P2 Q within 10 jiffies, a buyer and a seller -> COL·LUSIÓ', () => {
+    const g = mpGame('mp-col', two, 'tournament');
+    if (!drive(g, () => g.turns.phase === 'AUCTION_food' && g.rt.auction && g.rt.auction.engine.canDeclare())) return `stuck in ${g.turns.phase}`;
+    const e = g.rt.auction.engine;
+    g.auctionRole(ROLE.BUYER); g.onPlayerKey(key('KeyW', 'w'));
+    if (!drive(g, () => e.stage === 'trade', 2000)) return 'no trade stage';
+    g.screens.auction.onKey(g, { key: 'Enter' }); g.onPlayerKey(key('KeyQ', 'q'));
+    return e.collusion && e.collusion.members.join() === 'p0,p1' ? true : `collusion ${JSON.stringify(e.collusion)}`;
+  });
+  t('Development (2 humans): one at a time; the active human starts and walks with his own controls; P1 cannot start P2\'s turn', () => {
+    const g = mpGame('mp-dev');
+    const p1Ready = () => { const sl = g.devSlot(); return !!sl && sl.pid === 'p1' && sl.stage === 'ready'; };
+    for (let i = 0; i < 200000 && !p1Ready(); i++) {
+      const pd = g.turns.phaseData; if (pd && pd.skippable) g.skipPhase();
+      const sl = g.devSlot(); if (sl && sl.pid === 'p0' && sl.stage === 'ready') g.devStart(); else if (g.humanWalk()) g.devFinish();
+      g.tick(50);
+    }
+    if (!p1Ready()) return `stuck in ${g.turns.phase}`;
+    g.screens.map.onKey(g, { key: 'Enter' }); g.tick(50);
+    if (g.humanWalk()) return 'P1 started P2\'s turn';
+    g.onPlayerKey(key('KeyQ', 'q')); const w = g.humanWalk();
+    if (!w || w.pid !== 'p1') return 'P2 could not start his turn';
+    const x = w.x; g.input.keys.add('KeyA'); g.fastForward(500); g.input.keys.delete('KeyA');
+    if (!(w.x < x)) return `P2 did not walk: ${x} -> ${w.x}`;
+    const x2 = w.x; g.input.keys.add('ArrowLeft'); g.fastForward(500); g.input.keys.delete('ArrowLeft');
+    return w.x === x2 ? true : 'P1 arrows moved P2\'s colonist';
+  });
+  t('Hand-over (2 humans): "Prem tots els botons" waits for every human, or [Atari code] ~17 s; one human keeps the old wait', () => {
+    const g = mpGame('mp-hand');
+    if (!drive(g, () => g.turns.phase === 'STATUS')) return `stuck in ${g.turns.phase}`;
+    if (!g.turns.phaseData.wait) return 'no button wait';
+    g.skipPhase(); g.tick(50); if (g.turns.phase !== 'STATUS') return 'advanced with one button';
+    if (!g.turns.phaseData.wait.pressed.includes('p0')) return 'P1 press not recorded';
+    g.onPlayerKey(key('KeyQ', 'q')); g.tick(50);
+    if (g.turns.phase === 'STATUS') return 'did not advance with every button';
+    if (!drive(g, () => g.turns.phase === 'TURN_REPORT', 100000)) return 'no turn report';
+    g.fastForward(CONFIG.HANDOVER.timeoutMs - 200); if (g.turns.phase !== 'TURN_REPORT') return 'timed out too early';
+    g.fastForward(400); if (g.turns.phase === 'TURN_REPORT') return 'no timeout';
+    const one = mkGame(); one.newGame({ seed: 'mp-hand' });
+    if (!drive(one, () => one.turns.phase === 'STATUS')) return 'single: no status';
+    if (one.turns.phaseData.wait) return 'single human got the multi wait';
+    one.fastForward(30000); return one.turns.phase === 'STATUS' ? true : 'single human status timed out';
+  });
+  t('Save: schema 9 keeps the seats (humans, names, colours, species, keys) of a 2-human game; schema 8 is refused', () => {
+    if (CONFIG.SCHEMA_VERSION !== 9) return `schema ${CONFIG.SCHEMA_VERSION}`;
+    const { state, rng } = GameState.create({ seed: 'mp-save', humans: two });
+    const back = SaveSystem.deserialize(SaveSystem.serialize(state, rng));
+    if (back.incompatible || JSON.stringify(back.state) !== JSON.stringify(state)) return 'round trip';
+    if (back.state.players.map((p) => `${p.name}${p.isHuman ? p.keys : '-'}`).join() !== 'Ada0,Bo1,Bran-,Vela-') return 'seats lost';
+    const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: 8, turn: 3 }));
+    return old.incompatible && old.reason === 'old_rules' ? true : JSON.stringify(old);
+  });
+  t('Demo: four computers play with no input; hand-over screens advance after [Atari code] ~8.5 s; never saved; a finished demo restarts', () => {
+    const g = mpGame('demo-1', []);
+    if (!g.isDemo() || g.humanIds().length) return 'not a demo';
+    const real = SaveSystem.save; let saves = 0; SaveSystem.save = () => { saves++; return true; }; g.persist = true;
+    try {
+      const seen = new Set(); let statusMs = 0;
+      for (let i = 0; i < 200000 && !(g.state.turn === 2 && g.turns.phase === 'DEVELOPMENT'); i++) { seen.add(g.turns.phase); if (g.turns.phase === 'STATUS') statusMs += 50; g.tick(50); }
+      if (g.state.turn !== 2 || g.turns.phase !== 'DEVELOPMENT') return `stuck in ${g.turns.phase}, turn ${g.state.turn}`;
+      if (!['LAND_GRANT', 'DEVELOPMENT', 'PRODUCTION', 'STATUS', 'AUCTION_food', 'TURN_REPORT'].every((p) => seen.has(p))) return [...seen].join();
+      if (Math.abs(statusMs - CONFIG.HANDOVER.demoMs) > 100) return `status shown ${statusMs} ms`;
+      if (saves) return `demo saved ${saves} times`;
+      const seed = g.state.seed; g.finish(); g.fastForward(CONFIG.HANDOVER.demoMs + 200);
+      return g.mode === 'play' && g.isDemo() && g.state.turn === 1 && g.state.seed !== seed ? true : `no restart: ${g.mode} ${g.state.seed} ${g.state.turn}`;
+    } finally { SaveSystem.save = real; }
+  });
+  t('Gamepad: the first button on a pad claims the next human seat; then d-pad / stick + A act as that player', () => {
+    const g = mpGame('mp-pad');
+    if (!drive(g, () => g.turns.phase === 'LAND_GRANT' && g.landRace().cursor >= 0)) return `stuck in ${g.turns.phase}`;
+    const pad = (index, a, axes = [0, 0], dpad = []) => ({ index, connected: true, axes, buttons: Array.from({ length: 16 }, (_, k) => ({ pressed: k === 0 ? a : dpad.includes(k) })) });
+    GamepadInput.poll(g, [pad(0, true), pad(1, false)]);
+    GamepadInput.poll(g, [pad(0, false), pad(1, true)]);
+    if (JSON.stringify(g.padSeats) !== '{"0":0,"1":1}') return `seats ${JSON.stringify(g.padSeats)}`;
+    if (g.landRace().inputs.length) return 'the claiming press also acted';
+    GamepadInput.poll(g, [pad(0, false), pad(1, false, [0, -0.9])]);
+    if (g.playerDirs('p1').y !== -1 || g.playerDirs('p0').y !== 0) return `stick ${JSON.stringify(g.playerDirs('p1'))}`;
+    GamepadInput.poll(g, [pad(0, false, [0, 0], [15]), pad(1, true)]);
+    if (g.playerDirs('p0').x !== 1) return 'd-pad right';
+    return g.landRace().inputs.map((i) => i.pid).join() === 'p1' ? true : `inputs ${JSON.stringify(g.landRace().inputs)}`;
+  });
+
+  t('Setup: picking a colour another seat holds swaps them; more humans never share a colour; the options feed GameState', () => {
+    const st = mkGame().setup;
+    SetupScreen.setHumans(st, 2); SetupScreen.pickColor(st, 1, 'yellow');
+    if (st.seats[0].color !== 'coral' || st.seats[1].color !== 'yellow') return `swap ${st.seats.map((x) => x.color)}`;
+    st.seats[2].color = 'yellow'; SetupScreen.setHumans(st, 3);
+    if (new Set(st.seats.slice(0, 3).map((x) => x.color)).size !== 3) return `dup ${st.seats.map((x) => x.color)}`;
+    const o = SetupScreen.options(st); SetupScreen.setHumans(st, 0);
+    return o.humans.length === 3 && SetupScreen.options(st).humans.length === 0 && GameState.create(o).state.players.filter((p) => p.isHuman).length === 3 ? true : JSON.stringify(o);
+  });
   const failed = results.filter((r) => !r.ok);
   return { total: results.length, passed: results.length - failed.length, failed: failed.length, results };
 }

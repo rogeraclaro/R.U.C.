@@ -17,7 +17,8 @@ class InputManager {
     });
     canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key));
+    // `keys` holds both e.key (P1's arrows, Shift) and e.code (the physical keys of P2-P4, see PlayerControls).
+    window.addEventListener('keyup', (e) => { this.keys.delete(e.key); this.keys.delete(e.code); });
     window.addEventListener('blur', () => this.keys.clear());
   }
   pushContext(ctx) { this.contexts.push(ctx); return ctx; }
@@ -37,6 +38,7 @@ class InputManager {
   onDown(e) {
     const p = this.toLogical(e); Object.assign(this.pointer, p, { down: true });
     this.game.audio.unlock();
+    if (this.game.isDemo()) { this.pointer.down = false; this.game.goTitle(); e.preventDefault(); return; } // [C64] the demo: any input -> title
     try { this.canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     const w = this.hit(p.x, p.y); this.captured = w;
     if (w) {
@@ -67,9 +69,12 @@ class InputManager {
   onKeyDown(e) {
     const g = this.game;
     if (document.activeElement && document.activeElement.id === 'hid') return; // typing into the hidden text input
-    this.keys.add(e.key);
+    this.keys.add(e.key); if (e.code) this.keys.add(e.code);
     g.audio.unlock();
+    if (g.isDemo()) { this.keys.clear(); g.goTitle(); e.preventDefault(); return; } // [C64] the demo: any key -> title
     if (e.key === 'Escape') { g.onEscape(); e.preventDefault(); return; }
+    // Per-player layer: the keys of P2-P4 (and P1's button on a "press all buttons" wait); P1 otherwise goes through the screens.
+    if (g.onPlayerKey(e)) { e.preventDefault(); return; }
     for (let i = this.contexts.length - 1; i >= 0; i--) {
       const c = this.contexts[i];
       if (c.onKeyDown && c.onKeyDown(e)) { e.preventDefault(); return; }

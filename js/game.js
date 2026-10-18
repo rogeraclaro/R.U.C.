@@ -7,7 +7,12 @@ class Game {
     this.persist = true; // false in self-tests: a simulated game must never overwrite the player's save
     this.state = null; this.rng = null; this.rt = {}; this.turns = new TurnSystem();
     this.settings = this.loadSettings();
-    this.setup = { name: 'Roger', color: 'yellow', level: 'standard', species: 'mechtron', seed: this.randomSeed() };
+    // Setup: `humans` 1-4 (0 = the computer demo), `seat` = the seat being edited; one { name, color, species } per seat.
+    this.setup = {
+      humans: 1, seat: 0, level: 'standard', seed: this.randomSeed(),
+      seats: CONFIG.PLAYER_COLORS.map((c, i) => ({ name: i === 0 ? 'Roger' : `Jugador ${i + 1}`, color: c.id, species: 'mechtron' }))
+    };
+    this.padSeats = {}; this.padPrev = {}; this.padHeld = {}; // gamepad index -> seat (GamepadInput)
     this.renderer = new Renderer(canvas, this); this.input = new InputManager(canvas, this); this.audio = new AudioManager(this);
     const map = new MapScreen();
     this.screens = { title: new TitleScreen(), setup: new SetupScreen(), map, production: new ProductionScreen(map), report: new ReportScreen(), auction: new AuctionScreen(), landAuction: new LandAuctionScreen(), gameover: new GameOverScreen() };
@@ -69,7 +74,7 @@ class Game {
     this.screen = this.screens[name];
     if (this.screen.onKey) this.screenCtx = this.input.pushContext({ onKeyDown: (e) => this.screen.onKey(this, e) });
   }
-  goTitle() { this.mode = 'title'; this.paused = false; this.helpOpen = false; this.setScreen('title'); }
+  goTitle() { if (this.isDemo()) this.turns.phase = null; this.mode = 'title'; this.paused = false; this.helpOpen = false; this.setScreen('title'); }
   goSetup() { this.mode = 'setup'; this.setScreen('setup'); }
   /**
    * Autosaves happen at every phase boundary and between colonists in development. A manual exit also writes a save when the
@@ -83,8 +88,8 @@ class Game {
   }
   newGame(opts) {
     const seed = (opts.seed && String(opts.seed).trim()) || this.randomSeed();
-    const { state, rng } = GameState.create({ seed, level: opts.level, species: opts.species, playerName: (opts.playerName || 'Roger').trim() || 'Roger', colorId: opts.colorId });
-    this.state = state; this.rng = rng; this.rt = {}; this.paused = false; this.helpOpen = false; this.mode = 'play';
+    const { state, rng } = GameState.create({ seed, level: opts.level, species: opts.species, playerName: (opts.playerName || 'Roger').trim() || 'Roger', colorId: opts.colorId, humans: opts.humans || null });
+    this.state = state; this.rng = rng; this.rt = {}; this.paused = false; this.helpOpen = false; this.mode = 'play'; this.demoEndMs = 0;
     state.createdAt = Date.now(); this.defineTurnPhases(state);
     this.turns.enter(this, 'TURN_START');
   }
@@ -114,7 +119,7 @@ class Game {
     if (def && def.snapshot && this.state.phaseData === this.turns.phaseData) def.snapshot(this, this.turns);
   }
   save() {
-    if (!this.state || this.mode !== 'play' || !this.persist) return;
+    if (!this.state || this.mode !== 'play' || !this.persist || this.isDemo()) return; // the demo never touches the player's save
     this.snapshotPhase();
     SaveSystem.save(this.state, this.rng);
   }
@@ -139,7 +144,7 @@ class Game {
       if (this.lastTs === null) this.lastTs = ts;
       const raw = ts - this.lastTs; this.lastTs = ts;
       if (raw > 0) this.fps = Math.round(this.fps * 0.9 + (1000 / raw) * 0.1);
-      this.tick(raw); this.syncMusic(); this.render();
+      GamepadInput.poll(this); this.tick(raw); this.syncMusic(); this.render();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -150,6 +155,11 @@ class Game {
     if (this.paused || this.helpOpen) return;
     this.now += dt;
     if (this.mode === 'play' && this.turns.phase) this.turns.update(this, dt);
+    else if (this.isDemo() && this.screen === this.screens.gameover) {
+      // [Atari code] the demo jumps back to the start after its last wait and loops forever (a new seed each time).
+      this.demoEndMs = (this.demoEndMs || 0) + dt;
+      if (this.demoEndMs >= CONFIG.HANDOVER.demoMs) this.newGame({ seed: this.randomSeed(), level: this.state.level, humans: [] });
+    }
   }
   /** Test/debug helper: runs `ms` of game time in fixed steps (optionally until `until()` is true). */
   fastForward(ms, step = 50, until = null) {
@@ -163,6 +173,10 @@ class Game {
     else {
       this.screen.draw(this, r);
       if (this.mode === 'title' && this.titleNotice) r.text(this.titleNotice, 64, 620, { size: 18, color: COL.bad, maxW: 1100 });
+      if (this.isDemo()) {
+        r.panel(320, 682, 640, 32, { fill: 'rgba(6,9,18,0.92)', border: COL.amber });
+        r.text('Demostració · prem qualsevol tecla per tornar al títol', 640, 688, { size: 16, color: COL.amber, align: 'center', maxW: 620 });
+      }
       if (this.helpOpen) { r.beginModal(); r.region('barrier', 0, 0, CONFIG.W, CONFIG.H, {}); this.help.draw(this, r); }
       else if (this.paused) { r.beginModal(); r.region('barrier', 0, 0, CONFIG.W, CONFIG.H, {}); this.pauseOv.draw(this, r); }
     }
@@ -203,6 +217,11 @@ class Game {
     const ph = this.turns.phase;
     if (ph === 'LAND_GRANT') {
       const land = this.landRace(); if (!land) return '';
+      if (this.humanIds().length !== 1) {
+        if (land.done) return 'La cursa ha acabat.';
+        if (land.pause > 0 && land.lastClaim) return `${playerById(this.state, land.lastClaim.pid).name} ha reclamat la parcel·la #${land.lastClaim.plot + 1}`;
+        return this.humanIds().length ? 'Cada jugador prem el seu botó per reclamar la parcel·la' : 'Els ordinadors trien les parcel·les';
+      }
       const mine = land.claimed.p0;
       if (mine !== undefined) return `Has reclamat la parcel·la #${mine + 1}. Esperant els altres...`;
       if (land.done) return 'Aquest torn no tens parcel·la.';
@@ -219,7 +238,11 @@ class Game {
         if (!w.carrying.module) return w.area === 'town' ? 'Entra a un taller per equipar el RUC.' : 'Torna al poble: el RUC s\'ha d\'equipar a un taller.';
         return w.area === 'town' ? 'Surt del poble i porta el RUC a la casa d\'una parcel·la teva.' : 'Posa\'t sobre la casa d\'una parcel·la teva i prem Acció.';
       }
-      if (slot.stage === 'ready') return 'Prem el botó per començar (Acció, Enter, Espai o clic).';
+      if (slot.stage === 'ready') {
+        if (this.humanIds().length === 1) return 'Prem el botó per començar (Acció, Enter, Espai o clic).';
+        const p = playerById(this.state, slot.pid);
+        return `${p.name}: prem el teu botó (${PlayerControls.button(p.keys)}) o clica per començar.`;
+      }
       return `Desenvolupament: torn de ${playerById(this.state, slot.pid).name}`;
     }
     if (ph === 'PLANET_EVENT') return 'Esdeveniment planetari abans de la producció';
@@ -229,13 +252,16 @@ class Game {
 
   /* ---- human actions ---- */
   /** The human "buzzer" of the land race: stamped on the GAME clock, so it is deterministic and frozen by pause. */
-  humanClaim() {
+  humanClaim(pid = 'p0') {
     const land = this.landRace();
     if (!land || this.paused || this.helpOpen) return;
-    if (LandRace.press(land, 'p0')) this.audio.play('click');
+    if (LandRace.press(land, pid)) this.audio.play('click');
   }
-  /** Walking direction: held arrow keys plus the on-screen pad (touch / pointer). */
-  devDirs() { return walkDirs(this.input.keys, this.rt.pad); }
+  /** Walking direction of the colonist whose turn it is: his own keys / gamepad plus the on-screen pad (touch, open to anyone). */
+  devDirs() {
+    const s = this.devSlot(); const d = this.playerDirs(s ? s.pid : 'p0'); const pad = this.rt.pad || { x: 0, y: 0 };
+    return { x: Math.sign(d.x + (pad.x || 0)), y: Math.sign(d.y + (pad.y || 0)) };
+  }
   /** The colonist's action button. There is deliberately no way to pick a plot, buy or outfit from a panel. */
   devAction() { const w = this.humanWalk(); if (w && !this.paused && !this.helpOpen) DevWalk.act(this.state, w); }
   devFinish() { const w = this.humanWalk(); if (w && !this.paused) DevWalk.end(this.state, w, 'done'); }
@@ -283,7 +309,7 @@ class Game {
     if (p.isHuman && !this.autopilot) {
       // [C64] the personal event (if any) is shown first, then "press the button to start"; the walk is created by devStart.
       slot.stage = 'ready';
-      this.announce(`${ev ? `${ev.text} ` : ''}Prem el botó per començar.`);
+      this.announce(`${this.humanIds().length > 1 ? `Torn de ${p.name}. ` : ''}${ev ? `${ev.text} ` : ''}Prem el botó per començar.`);
     } else {
       if (ev) slot.log.push(`${p.name}: ${ev.text}`);
       const turn = AISystem.turn(s, this.rng, p);
@@ -336,15 +362,90 @@ class Game {
     if (rec) { this.audio.play(AudioManager.eventFx(rec.id)); this.announce(`${rec.name}. ${rec.text}`); }
     this.setScreen('map');
   }
-  skipPhase() { if (this.turns.phaseData && this.turns.phaseData.skippable) this.turns.canAdvance = true; }
+  /** Continue / skip (P1's click or key, or any human's button). On a "press all buttons" wait it is one human's press. */
+  skipPhase(pid = null) {
+    const pd = this.turns.phaseData; if (!pd || !pd.skippable) return;
+    if (pd.wait) { this.handOverPress(pid || this.pidOfSeat(0)); return; }
+    this.turns.canAdvance = true;
+  }
+
+  /* ---- seats: 1-4 humans on one machine, the computer demo ---- */
+  /** The human colonists (seat order: p0 = P1 ...). None in the demo. */
+  humanIds() { return this.state ? this.state.players.filter((p) => p.isHuman).map((p) => p.id) : []; }
+  /** [C64] COMPUTER DEMO: a game with no human seat. */
+  isDemo() { return this.mode === 'play' && !!this.state && !this.state.players.some((p) => p.isHuman); }
+  /** Human seats a gamepad may claim: the game's humans, or the setup's count before a game. */
+  seatCount() { return this.mode === 'play' && this.state ? this.humanIds().length : this.setup.humans; }
+  pidOfSeat(seat) { const p = this.state ? this.state.players.find((q) => q.isHuman && q.keys === seat) : null; return p ? p.id : null; }
+  /** Colonists played by the computer (the autopilot also plays the humans). */
+  aiDriven(p) { return !p.isHuman || this.autopilot; }
+  /** A player's held direction (his keyboard layout and his gamepad). y: -1 = up. */
+  playerDirs(pid) {
+    const p = this.state && playerById(this.state, pid); const seat = p && p.isHuman ? p.keys : null;
+    return PlayerControls.dirs(this.input.keys, seat, seat === null ? null : this.padHeld[seat]);
+  }
+  /**
+   * Per-player key layer (InputManager): P2-P4's keys always; P1's button only on a "press all buttons" wait, otherwise P1 keeps the
+   * screens' own key handling (focus, Tab, Enter on buttons). Returns true when the key was used.
+   */
+  onPlayerKey(e) {
+    if (this.mode !== 'play' || !this.state || this.paused || this.helpOpen) return false;
+    const m = PlayerControls.match(e.code); if (!m) return false;
+    const pid = this.pidOfSeat(m.seat); if (!pid) return false;
+    const wait = !!(this.turns.phaseData && this.turns.phaseData.wait);
+    if (m.seat === 0 && !(wait && m.action === 'button')) return false;
+    if (e.repeat) return true;
+    if (m.action === 'button') this.playerButton(pid); else this.playerDir(pid, m.action);
+    return true;
+  }
+  /** A human's stick button: what it does depends on the phase ([C64][manual] every human has his own). */
+  playerButton(pid) {
+    const p = this.state && playerById(this.state, pid);
+    if (this.mode !== 'play' || !p || !p.isHuman || this.autopilot || this.paused || this.helpOpen) return false;
+    const ph = this.turns.phase; const pd = this.turns.phaseData || {}; const a = this.rt.auction;
+    if (pd.wait) this.handOverPress(pid);
+    else if (ph === 'LAND_GRANT') this.humanClaim(pid);
+    else if (ph === 'LAND_AUCTION') this.landNext();
+    else if (ph === 'DEVELOPMENT') {
+      // One colonist at a time: only the active human's button starts / acts in his own turn.
+      const s = this.devSlot(); if (!s || s.pid !== pid) return true;
+      if (s.stage === 'ready') this.devStart(); else if (this.humanWalk()) this.devAction();
+    } else if (ph && ph.startsWith('AUCTION_') && a && !a.engine.ended) {
+      if (a.engine.canDeclare()) this.auctionToggleOut(pid); else this.auctionButton(pid);
+    } else this.skipPhase(pid);
+    return true;
+  }
+  /** A pushed direction (press edge): during an auction's declaration, up / right = seller, down / left = buyer (as P1's arrows). */
+  playerDir(pid, dir) {
+    const p = this.state && playerById(this.state, pid);
+    if (this.mode !== 'play' || !p || !p.isHuman || this.autopilot || this.paused || this.helpOpen) return;
+    const ph = this.turns.phase; const a = this.rt.auction;
+    if (ph && ph.startsWith('AUCTION_') && a && a.engine.canDeclare()) this.auctionRole(dir === 'up' || dir === 'right' ? ROLE.SELLER : ROLE.BUYER, pid);
+  }
+  /**
+   * [Atari code] waitPlayersButtons: with two or more humans, the status and summary screens wait for every human's button (each one
+   * recorded as he presses), or CONFIG.HANDOVER.timeoutMs. One human keeps the classic wait (a press / click); the demo uses a timer.
+   */
+  handOver(ts) { if (!this.autopilot && this.humanIds().length >= 2) ts.phaseData.wait = { pressed: [], ms: 0 }; }
+  handOverPress(pid) {
+    const w = this.turns.phaseData && this.turns.phaseData.wait; if (!w || !pid) return;
+    if (!w.pressed.includes(pid)) { w.pressed.push(pid); this.audio.play('click'); }
+    if (this.humanIds().every((id) => w.pressed.includes(id))) this.turns.canAdvance = true;
+  }
+  /** The timer of a status / summary screen: the autopilot's short one, or [Atari code] the demo's ~8.5 s. */
+  handOverMs() { return this.isDemo() ? CONFIG.HANDOVER.demoMs : this.fast(400); }
+  updateHandOver(dt, ts) {
+    const w = ts.phaseData.wait; if (!w) return;
+    w.ms += dt; if (w.ms >= CONFIG.HANDOVER.timeoutMs) ts.canAdvance = true;
+  }
 
   /* ---- auction input ---- */
   /** Roles can only be chosen during the declaration ([manual]); afterwards they are fixed. */
-  auctionRole(role) {
-    const a = this.rt.auction; if (!a || a.engine.ended || !a.engine.canDeclare()) return;
-    if (role !== ROLE.OUT) a.lastRole = role;
-    if (a.engine.entry('p0').role !== role) this.audio.play('declare');
-    a.engine.setRole('p0', role);
+  auctionRole(role, pid = 'p0') {
+    const a = this.rt.auction; if (!a || a.engine.ended || !a.engine.canDeclare() || !a.engine.entry(pid)) return;
+    if (role !== ROLE.OUT) a.lastRole[pid] = role;
+    if (a.engine.entry(pid).role !== role) this.audio.play('declare');
+    a.engine.setRole(pid, role);
   }
   /** [Atari code] a human marker moves one step per 8 frames (the line speed of every colonist); Shift x3 is a R.U.C. convenience. */
   /**
@@ -356,22 +457,29 @@ class Game {
     return a.engine.collusionPress(pid);
   }
   humanStepsPerSec() { return (1000 / AuctionEngine.lineMs()) * (this.input.keys.has('Shift') ? 3 : 1); }
-  auctionToggleOut() {
-    const a = this.rt.auction; if (!a) return;
-    this.auctionRole(a.engine.entry('p0').role === ROLE.OUT ? (a.lastRole || ROLE.BUYER) : ROLE.OUT);
+  auctionToggleOut(pid = 'p0') {
+    const a = this.rt.auction; if (!a || !a.engine.entry(pid)) return;
+    this.auctionRole(a.engine.entry(pid).role === ROLE.OUT ? (a.lastRole[pid] || ROLE.BUYER) : ROLE.OUT, pid);
   }
+  /** [manual] every human moves his own marker at the same time, each with his own keys / gamepad (held up / down). */
   updateAuctionInput(dt) {
-    const a = this.rt.auction; const e = a.engine; const k = this.input.keys;
-    if (e.stage !== 'trade' || e.entry('p0').role === ROLE.OUT) return;
-    const dir = (k.has('ArrowUp') ? 1 : 0) - (k.has('ArrowDown') ? 1 : 0);
-    if (dir) { e.nudge('p0', dir, dt, this.humanStepsPerSec()); e.push(); }
+    const e = this.rt.auction.engine;
+    if (e.stage !== 'trade') return;
+    this.humanIds().forEach((pid) => {
+      const en = e.entry(pid); if (!en || en.role === ROLE.OUT) return;
+      const dir = -this.playerDirs(pid).y;
+      if (dir) { e.nudge(pid, dir, dt, this.humanStepsPerSec()); e.push(); }
+    });
   }
-  /** Human marker in the land auction: the same keys and line speed as the goods auction. */
+  /** Human markers in the land auction: the same keys and line speed as the goods auction, every human at once. */
   updateLandInput(dt) {
-    const la = this.landAuction(); const k = this.input.keys;
-    if (!la || la.stage !== 'bid' || !la.bids.p0) return;
-    const dir = (k.has('ArrowUp') ? 1 : 0) - (k.has('ArrowDown') ? 1 : 0);
-    if (dir) { LandAuction.nudge(this.state, la, 'p0', dir, dt, this.humanStepsPerSec()); LandAuction.push(la); }
+    const la = this.landAuction();
+    if (!la || la.stage !== 'bid') return;
+    this.humanIds().forEach((pid) => {
+      if (!la.bids[pid]) return;
+      const dir = -this.playerDirs(pid).y;
+      if (dir) { LandAuction.nudge(this.state, la, pid, dir, dt, this.humanStepsPerSec()); LandAuction.push(la); }
+    });
   }
   /** Pointer / touch: puts the human's land bid at a price (dragging the lane or the buttons). */
   landBid(price) {
@@ -447,7 +555,7 @@ class Game {
           g.setScreen('map');
           if (ts.phaseData.land) return; // resumed from a save taken mid-sweep: keep cursor, timers and claims as they were
           // The autopilot human is driven by the same AI planner (with its simulated reaction time).
-          const aiIds = g.state.players.filter((p) => !p.isHuman || g.autopilot).map((p) => p.id);
+          const aiIds = g.state.players.filter((p) => g.aiDriven(p)).map((p) => p.id);
           ts.phaseData.land = LandRace.create(g.state, g.rng, aiIds);
         },
         update: (g, dt, ts) => {
@@ -468,7 +576,7 @@ class Game {
         id: 'LAND_AUCTION', label: 'Subhasta de terres', save: true, resumable: true,
         enter: (g, ts) => {
           if (!ts.phaseData.landAuction) {
-            const aiIds = g.state.players.filter((p) => !p.isHuman || g.autopilot).map((p) => p.id);
+            const aiIds = g.state.players.filter((p) => g.aiDriven(p)).map((p) => p.id);
             ts.phaseData.landAuction = LandAuction.create(g.state, g.rng, aiIds, { fast: g.autopilot });
           }
           const la = ts.phaseData.landAuction;
@@ -537,8 +645,8 @@ class Game {
       },
       {
         id: 'STATUS', label: 'Estat: consum i malbaratament', save: true,
-        enter: (g, ts) => { g.rt.reportMode = 'status'; ts.phaseData.timer = g.fast(400); ts.phaseData.skippable = true; g.setScreen('report'); g.announce('Estat del torn: consum, malbaratament i collita'); },
-        update: (g, dt, ts) => { if (g.autopilot) timed(g, dt, ts); }
+        enter: (g, ts) => { g.rt.reportMode = 'status'; ts.phaseData.timer = g.handOverMs(); ts.phaseData.skippable = true; g.handOver(ts); g.setScreen('report'); g.announce('Estat del torn: consum, malbaratament i collita'); },
+        update: (g, dt, ts) => { if (g.autopilot || g.isDemo()) timed(g, dt, ts); else g.updateHandOver(dt, ts); }
       }
     ];
     auctionResources(state).forEach((d) => defs.push(this.auctionPhase(d)));
@@ -550,10 +658,10 @@ class Game {
           // [PROVISIONAL] order: P for the next round's auctions first, then the M.U.L.E. build (see StoreSystem.updatePrices).
           StoreSystem.updatePrices(s, g.rng); g.rt.storeReport = StoreSystem.betweenTurns(s); ScoringSystem.endTurn(s);
           g.rt.turnRank = ScoringSystem.ranking(s, g.rng); g.rt.auctionSummary = s.auctionLog.filter((x) => x.turn === s.turn);
-          g.rt.reportMode = 'turn'; ts.phaseData.skippable = true; ts.phaseData.timer = g.fast(400); g.setScreen('report');
+          g.rt.reportMode = 'turn'; ts.phaseData.skippable = true; ts.phaseData.timer = g.handOverMs(); g.handOver(ts); g.setScreen('report');
           g.announce(`Informe del torn ${s.turn}`);
         },
-        update: (g, dt, ts) => { if (g.autopilot) timed(g, dt, ts); }
+        update: (g, dt, ts) => { if (g.autopilot || g.isDemo()) timed(g, dt, ts); else g.updateHandOver(dt, ts); }
       },
       { id: 'AUTOSAVE', label: 'Desat', enter: (g, ts) => { g.save(); ts.canAdvance = true; } },
       {
@@ -573,14 +681,14 @@ class Game {
         if (!saved && def.id === 'crystite' && !CrystiteSystem.auctionNeeded(s)) { g.rt.auction = null; ts.canAdvance = true; return; }
         if (saved) {
           // Resumed from a save taken mid-auction (declaration or trade stage): exact engine, AI brains and roles.
-          g.rt.auction = { engine: AuctionEngine.restore(saved.engine, { market, state: s, rng: g.rng, onTrade }), brains: JSON.parse(JSON.stringify(saved.brains)), res: def.id, endHold: saved.endHold, lastRole: saved.lastRole, viewHi: saved.viewHi };
+          g.rt.auction = { engine: AuctionEngine.restore(saved.engine, { market, state: s, rng: g.rng, onTrade }), brains: JSON.parse(JSON.stringify(saved.brains)), res: def.id, endHold: saved.endHold, lastRole: saved.lastRole || {}, viewHi: saved.viewHi };
         } else {
           const engine = new AuctionEngine({ market, state: s, rng: g.rng, colonists: s.players.map((p) => p.id), onTrade });
           const brains = {};
-          s.players.forEach((p) => { if (!p.isHuman || g.autopilot) brains[p.id] = AISystem.createBrain(s, g.rng, p); });
+          s.players.forEach((p) => { if (g.aiDriven(p)) brains[p.id] = AISystem.createBrain(s, g.rng, p); });
           // [manual] with a surplus your character jumps to SELL, otherwise to BUY; the human can change it until the declaration ends.
-          s.players.forEach((p) => { if (p.isHuman && !g.autopilot) engine.setRole(p.id, AISystem.defaultRole(s, p, def.id)); });
-          g.rt.auction = { engine, brains, res: def.id, endHold: 0, lastRole: ROLE.BUYER, viewHi: 0 };
+          s.players.forEach((p) => { if (!g.aiDriven(p)) engine.setRole(p.id, AISystem.defaultRole(s, p, def.id)); });
+          g.rt.auction = { engine, brains, res: def.id, endHold: 0, lastRole: {}, viewHi: 0 };
         }
         g.setScreen('auction'); g.announce(`Subhasta de ${def.label}: declareu-vos compradors o venedors`);
       },

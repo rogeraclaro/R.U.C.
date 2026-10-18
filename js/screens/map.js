@@ -62,7 +62,9 @@ class MapScreen {
     }
     if (game.turns.phase === 'DEVELOPMENT') {
       const slot = game.devSlot();
-      if (slot && slot.stage === 'ready' && action && (!onButton || f === 'd-start')) { game.devStart(); return true; }
+      // P1's keys only act in P1's own turn; the other humans use their own keys (Game.onPlayerKey).
+      if (!slot || slot.pid !== game.pidOfSeat(0)) return false;
+      if (slot.stage === 'ready' && action && (!onButton || f === 'd-start')) { game.devStart(); return true; }
       if (!game.humanWalk()) return false;
       if (e.key.startsWith('Arrow')) return true;
       if (action && !onButton) { game.devAction(); return true; }
@@ -353,9 +355,10 @@ class MapScreen {
       const y = 64 + i * 108;
       const current = dev && dev.order[dev.idx] === p.id;
       r.panel(X, y, W, 102, { border: current ? COL.cyan : p.isHuman ? COL.amber : COL.border });
+      const many = game.humanIds().length > 1;
       SpeciesArt.draw(r, p.species, X + 8, y + 8, 64, p.color, portraitFrame(p));
       r.glyph(p.shape, X + 86, y + 20, 9, p.color, '#05070d');
-      r.text(`${p.name}${p.isHuman ? ' (tu)' : ''}`, X + 102, y + 8, { size: 18, maxW: 150 });
+      r.text(`${p.name}${p.isHuman ? (many ? ` (J${p.keys + 1})` : ' (tu)') : ''}`, X + 102, y + 8, { size: 18, maxW: 150 });
       r.text(speciesById(p.species).label, X + 102, y + 32, { size: 16, color: COL.dim, maxW: 120 });
       r.text(fmtCr(p.cash), X + W - 10, y + 8, { size: 18, color: COL.amber, align: 'right' });
       if (land) {
@@ -385,8 +388,8 @@ class MapScreen {
     r.text(`Corral: ${s.store.ruc} RUCs · ${StoreSystem.rucPrice(s)} cr`, X + 10, ly, { size: 16 });
     const sales = LandOffice.forSale(s);
     if (sales.length) r.text(`En venda: ${sales.map((x) => `#${x.plotId + 1} (${playerById(s, x.pid).name})`).join(', ')}`, X + 10, ly + 24, { size: 14, color: COL.amber, maxW: 348 });
-    // Tournament: the human's assay results (an R.U.C. reminder; the C64 only prints the message, nothing is marked on the map).
-    const mine = s.crystite ? s.crystite.assays.filter((a) => a.pid === 'p0') : [];
+    // Tournament: the humans' assay results (an R.U.C. reminder; the C64 only prints the message, nothing is marked on the map).
+    const mine = s.crystite ? s.crystite.assays.filter((a) => playerById(s, a.pid).isHuman) : [];
     if (mine.length) r.text(`Assaigs: ${mine.slice(-6).reverse().map((a) => `#${a.plotId + 1} ${CrystiteSystem.LEVEL_NAMES[a.level]}`).join(' · ')}`, X + 10, ly + (sales.length ? 44 : 24), { size: 14, color: '#d77bff', maxW: 348 });
   }
   /** Touch / pointer direction pad for walking: each arrow is held (pointer down) and released (pointer up). */
@@ -475,8 +478,11 @@ class MapScreen {
     SpeciesArt.draw(r, p.species, x + 20, y + 22, 96, p.color, portraitFrame(p));
     r.text(`Torn de ${p.name}`, x + 136, y + 22, { size: 20, color: p.color, maxW: w - 150 });
     r.text('Prem el botó per començar', x + 136, y + 56, { size: 26, color: COL.amber, maxW: w - 150 });
-    r.text('Acció, Enter, Espai o clic', x + 136, y + 100, { size: 16, color: COL.dim, maxW: w - 150 });
-    r.region('ready-start', 0, 60, 880, 520, { focusable: true, label: 'Comença el torn', onClick: () => game.devStart(), onKey: (e) => { if (e.key === 'Enter' || e.key === ' ') { game.devStart(); return true; } return false; } });
+    const many = game.humanIds().length > 1;
+    r.text(many ? `${PlayerControls.button(p.keys)} (J${p.keys + 1}) o clic` : 'Acció, Enter, Espai o clic', x + 136, y + 100, { size: 16, color: COL.dim, maxW: w - 150 });
+    // The mouse / touch is open to whoever is active; P1's Enter / Space only start P1's own turn.
+    const mineKeys = slot.pid === game.pidOfSeat(0);
+    r.region('ready-start', 0, 60, 880, 520, { focusable: true, label: 'Comença el torn', onClick: () => game.devStart(), onKey: (e) => { if (mineKeys && (e.key === 'Enter' || e.key === ' ')) { game.devStart(); return true; } return false; } });
   }
   drawEventCards(game, r, items, emptyText) {
     r.dim(0.55);

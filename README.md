@@ -1,6 +1,7 @@
 # R.U.C.
 
-Reinterpretació de **M.U.L.E.** (Dani Bunten, 1983): un jugador contra tres rivals IA (Bran, Vela i Nox, tots Mechtrons),
+Reinterpretació de **M.U.L.E.** (Dani Bunten, 1983): d'1 a 4 jugadors humans al mateix ordinador; els seients que queden són rivals IA
+(Bran, Vela, Nox i Iris, tots Mechtrons), o bé una **demostració** amb quatre ordinadors,
 12 torns (6 al nivell Principiant), subhasta contínua en temps real. Ajustada a les regles del M.U.L.E. original de Commodore 64: nivells
 Principiant, Estàndard i Torneig (amb crystite, oficina d'assaig i col·lusió), amb subhastes de terra. HTML, CSS i JavaScript vanilla amb Canvas 2D; cap dependència.
 
@@ -15,6 +16,10 @@ Funciona sense connexió. No hi ha CDN, npm, bundler ni IA en temps d'execució.
 
 ## Configuració
 
+- **Jugadors** ([C64] F5 al títol: 4, 3, 2, 1 planeteers o COMPUTER DEMO): **1–4 humans** o **Demo (només ordinadors)**. Cada humà té
+  una pestanya (J1–J4) amb el seu **nom**, **color** (únic: triar el color d'un altre jugador els intercanvia) i **espècie**, i els seus
+  controls (vegeu [Diversos jugadors](#diversos-jugadors)). Els humans ocupen els primers seients (p0 = J1…); els ordinadors omplen la
+  resta amb els noms Bran, Vela, Nox i Iris, per aquest ordre, sempre Mechtrons. Amb un sol humà la partida és exactament la d'abans.
 - **Espècie** ([codi Atari], [C64]): Mechtron, Gollumer, Packer, Bonzoid, Spheroid, Flapper, Leggite o Humanoid. Només canvien els diners
   i el temps de torn: **Flapper 1600 cr** i temps ×9/7, **Humanoid 600 cr** i temps ×5/7, la resta 1000 cr i temps normal. Els rivals de
   l'ordinador són sempre Mechtrons amb 1000 cr. Els dibuixos de les espècies són propis (no hi ha asset); l'Humanoid fa servir el retrat
@@ -116,6 +121,35 @@ alenteixen ([codi Atari] 6 / 14 / 21 fotogrames per pas: plana / riu / muntanya)
 
 Les opcions **So** i **Reduir moviment** són al menú de pausa (i So també al HUD).
 
+### Diversos jugadors
+
+Cada humà té el seu «joystick» i el seu «botó» (les tecles es llegeixen per posició física, `KeyboardEvent.code`, i funcionen amb qualsevol
+distribució de teclat):
+
+| Jugador | Moure (↑ ↓ ← →) | Botó |
+|---|---|---|
+| J1 | fletxes (i ratolí / tacte) | `Enter` o `Espai` |
+| J2 | `W` `S` `A` `D` | `Q` |
+| J3 | `I` `K` `J` `L` | `U` |
+| J4 | teclat numèric `8` `5` (o `2`) `4` `6` | `0` del teclat numèric |
+| Comandament (Gamepad API) | creu direccional o palanca esquerra | `A` (botó 0) |
+
+Un **comandament** s'assigna al següent jugador humà que encara no en té amb la **primera pulsació** del seu botó (aquesta pulsació no fa
+res més); després funciona a més de les tecles d'aquell jugador.
+
+- **Adjudicació de terra**: tots alhora; cadascú prem el seu botó quan el cursor és sobre la parcel·la que vol (una per jugador; en un
+  empat guanya el colon amb menys patrimoni, [manual]).
+- **Subhastes de béns i de terres**: tots alhora, cadascú mou el seu marcador. Declaració: amunt/dreta venedor, avall/esquerra comprador,
+  botó = fora. Negociació: amunt/avall mouen el preu; al **Torneig** el botó és el de la **col·lusió** (dos humans, un comprador i un
+  venedor, premen en menys de 10 jiffies, [codi Atari]). El ratolí, els botons de pantalla i el control lliscant són de J1.
+- **Desenvolupament**: un per un, en l'ordre de patrimoni; cada humà comença («Prem el botó per començar») i camina amb els seus
+  controls. El ratolí, el tacte i els botons de pantalla funcionen per a qui té el torn; les tecles de J1 només en el torn de J1.
+- **Estat i informe del torn**: «Prem tots els botons dels jugadors per continuar» ([codi Atari] `waitPlayersButtons`): espera el botó
+  de cada humà (es marca qui ja ha premut; el botó de pantalla és el de J1) o un temps límit de **17 s** (1020 jiffies). Amb un sol humà,
+  com sempre: un clic o una tecla.
+- **Demostració** ([C64] COMPUTER DEMO): quatre ordinadors; les pantalles d'espera avancen soles al cap de **~8,5 s**; al final comença
+  una partida nova amb una llavor nova, indefinidament. Qualsevol tecla, clic o botó de comandament torna al títol. La demo no desa mai.
+
 ## So
 
 Tot el so es sintetitza en temps real amb WebAudio a l'estil del xip SID (`js/ui/audio.js`): no hi ha cap fitxer d'àudio. **Totes les
@@ -140,7 +174,7 @@ rellotge del joc. A la pantalla final, **Repetir llavor** i **Nova llavor**. Amb
 
 ## Desat
 
-Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **8**: nivell, dipòsits de crystite, mapa conegut de la IA i assaigs del Torneig, espècie, parcel·les en venda, preu de l'última subhasta de terres, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
+Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **9**: seients humans i ordinadors amb el nom, color, espècie i controls de cada jugador, nivell, dipòsits de crystite, mapa conegut de la IA i assaigs del Torneig, espècie, parcel·les en venda, preu de l'última subhasta de terres, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
 **Continuar** al títol reprèn a la fase desada.
 
 «Desa i surt al títol» (menú de pausa) escriu un desat exacte a les fases **represables**: cursa de terra, desenvolupament (posició, RUC que
@@ -148,7 +182,7 @@ portes, rellotge, Wampus, ordre i esdeveniments ja sortejats), subhastes de terr
 l'últim desat de frontera, perquè tornar-hi a mitja fase podria aplicar-ne els efectes dues vegades. La liquidació del torn queda desada
 a l'estat (`settlement`) i no es torna a executar mai.
 
-**Desats antics:** un desat dels esquemes 1 a 7 (regles anteriors: estocs inicials, preus, temps, patrimoni, esdeveniments, dificultats, subhastes) **no es migra**: el joc avisa al títol que
+**Desats antics:** un desat dels esquemes 1 a 8 (regles anteriors o un sol seient humà: estocs inicials, preus, temps, patrimoni, esdeveniments, dificultats, subhastes) **no es migra**: el joc avisa al títol que
 és d'una versió anterior amb unes altres regles i l'esborra. Un desat malmès també s'avisa. Cap desat incompatible s'accepta en silenci.
 
 ## Paràmetres d'URL (proves i depuració)
@@ -156,7 +190,7 @@ a l'estat (`settlement`) i no es torna a executar mai.
 - `?test=1` executa `runSelfTests()` i mostra PASS/FAIL sense iniciar cap partida (detall i resum de la partida completa a la `console`).
 - `?debug=1` barra inferior amb fase, llavor, FPS, estocs, decisions IA i els botons **Següent fase**, **+1000 cr** i **Força esdeveniment**
   (aplica només aquell esdeveniment; els individuals, al jugador).
-- `?autoplay=1` el jugador humà el controla la mateixa IA (desenvolupament instantani, com les IA de l'original); `&level=beginner` per al Principiant.
+- `?autoplay=1` el jugador humà (J1) el controla la mateixa IA (desenvolupament instantani, com les IA de l'original); `&level=beginner` per al Principiant.
 
 ## Estructura
 
@@ -169,7 +203,7 @@ ruc/
 │   ├── state/        models de dades: Plot, PlayerState, StoreState, ResourceLedger + RucAudit, GameState
 │   ├── systems/      lògica pura: torn, botiga, terra (i oficina de terres), producció, consum, liquidació, esdeveniments,
 │   │                 puntuació, pub, Wampus, desat, subhasta, subhasta de terres, IA, ordre i caminada de desenvolupament (poble)
-│   ├── ui/           hud.js (colors, formats, Hud), species-art.js, overlays.js, input.js, audio.js, renderer.js
+│   ├── ui/           hud.js (colors, formats, Hud), species-art.js, overlays.js, input.js, controls.js (tecles per jugador i comandaments), audio.js, renderer.js
 │   ├── screens/      title, setup, map, production, report, auction, land-auction, gameover
 │   ├── tests.js      runSelfTests (?test=1)
 │   └── game.js       Game + arrencada

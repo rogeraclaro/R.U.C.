@@ -36,7 +36,7 @@ class AuctionScreen {
   draw(game, r) {
     const s = game.state; const a = game.rt.auction;
     if (!a) { r.asset('auction_hall_bg', 0, 0, CONFIG.W, CONFIG.H); r.dim(0.35); Hud.draw(game, r); return; } // a skipped auction
-    const e = a.engine; const m = e.market; const human = s.players[0]; const col = e.collusion;
+    const e = a.engine; const m = e.market; const human = s.players[0]; const col = e.collusion; const many = game.humanIds().length > 1;
     const v = game.auctionView(); const py = (p) => clamp(this.priceY(v, p), AUC.top - 8, AUC.bottom + 8);
     const declaring = e.canDeclare(); const live = !game.paused && !e.ended;
     r.asset('auction_hall_bg', 0, 0, CONFIG.W, CONFIG.H); r.dim(0.35);
@@ -78,6 +78,7 @@ class AuctionScreen {
       r.glyph(p.shape, lx + 14, AUC.top - 40, 8, p.color, '#05070d');
       r.text(p.name, lx + 28, AUC.top - 50, { size: 16, maxW: 110 });
       r.text(en.role === ROLE.BUYER ? 'COMPRADOR' : en.role === ROLE.SELLER ? 'VENEDOR' : 'FORA', lx + 6, AUC.top - 26, { size: 16, color: en.role === ROLE.OUT ? COL.dim : COL.text });
+      if (many && p.isHuman) r.text(`J${p.keys + 1}`, lx + AUC.laneW - 6, AUC.top - 26, { size: 16, color: p.color, align: 'right' });
       if (en.role !== ROLE.OUT) {
         const y = py(en.price); const bx = lx + (en.role === ROLE.BUYER ? 36 : 110);
         this.drawMarker(r, en.role, bx, y, p.color, p.shape, declaring);
@@ -147,7 +148,8 @@ class AuctionScreen {
     r.button('a-up', 'Preu ▲', 730, Y, 120, 48, { disabled: !trading || hen.role === ROLE.OUT, onClick: () => { e.nudge('p0', 1, 1000, 4); e.push(); } });
     r.button('a-down', 'Preu ▼', 858, Y, 120, 48, { disabled: !trading || hen.role === ROLE.OUT, onClick: () => { e.nudge('p0', -1, 1000, 4); e.push(); } });
     r.text(declaring ? 'Declara: ↑/→ venedor, ↓/← comprador, Espai fora. Després el rol és fix.' : '↑/↓ o roda: preu (Maj ×3). El rol ja no es pot canviar.', 30, Y + 56, { size: 16, color: declaring ? COL.amber : COL.dim, maxW: 760 });
-    r.text('Línies en contacte: unitat a unitat', 800, Y + 56, { size: 16, color: COL.dim, maxW: 450 });
+    // Several humans: each one moves his own marker with his own keys (the buttons and the slider above are J1's).
+    r.text(many ? 'Preu: J2 W/S · J3 I/K · J4 8/5' : 'Línies en contacte: unitat a unitat', 800, Y + 56, { size: 16, color: COL.dim, maxW: 450 });
     if (col) this.drawCollusion(game, r, col);
     if (e.ended) this.drawEnd(game, r);
     if (game.debug) game.drawDebugBar(r);

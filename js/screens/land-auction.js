@@ -84,7 +84,8 @@ class LandAuctionScreen {
     const canBid = bidding && !!la.bids.p0; const step = CONFIG.LAND_AUCTION.step;
     r.button('la-up', `Puja ▲ ${step * 4} cr`, 30, Y, 200, 48, { disabled: !canBid, onClick: () => game.landBid(la.bids.p0.price + step * 4) });
     r.button('la-down', `Baixa ▼ ${step * 4} cr`, 240, Y, 200, 48, { disabled: !canBid, onClick: () => game.landBid(la.bids.p0.price - step * 4) });
-    const hint = !la.bids.p0 ? `Ets el venedor: els altres colons fan les ofertes per la teva parcel·la.`
+    const hint = game.isDemo() ? 'Demostració: els ordinadors pugen les seves ofertes.' : game.humanIds().length > 1 ? 'Cada jugador puja la seva oferta alhora: J1 ↑/↓, J2 W/S, J3 I/K, J4 8/5 (mantén-ho premut). Guanya l\'oferta més alta quan s\'acaba el temps.'
+      : !la.bids.p0 ? `Ets el venedor: els altres colons fan les ofertes per la teva parcel·la.`
       : '↑/↓ (mantén-ho premut; Maj ×3), arrossega al teu carril o roda: puja la teva oferta. Guanya l\'oferta més alta quan s\'acaba el temps.';
     r.wrap(hint, 460, Y + 2, 790, 22, { size: 16, color: COL.dim });
     if (la.stage === 'intro') this.drawIntro(r, la, s);

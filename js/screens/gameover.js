@@ -27,7 +27,8 @@ class GameOverScreen {
       r.icon(d.id, 740, 346 + i * 36, 24); r.text(`${d.label}: ${vol} unitats`, 774, 348 + i * 36, { size: 18 });
     });
     r.wrap(`Patrimoni: efectiu + béns (al preu de la botiga) + ${CONFIG.PLOT_VALUE}/parcel·la + RUCs instal·lats (${CONFIG.RUC_WORTH} + cost del mòdul). Sense cap deute.`, 740, 360 + res.length * 36, 480, 22, { size: 16, color: COL.dim });
-    const again = (seed) => game.newGame({ seed, level: s.level, species: s.players[0].species, playerName: s.players[0].name, colorId: colorIdOf(s.players[0].color) });
+    // The same seats again (humans with their names, colours and species; the computers fill the rest).
+    const again = (seed) => game.newGame({ seed, level: s.level, humans: s.players.filter((p) => p.isHuman).map((p) => ({ name: p.name, colorId: colorIdOf(p.color), species: p.species })) });
     r.button('g-same', 'Repetir llavor', 60, 630, 240, 52, { onClick: () => again(s.seed) });
     r.button('g-new', 'Nova llavor', 320, 630, 240, 52, { primary: true, onClick: () => again(game.randomSeed()) });
     r.button('g-title', 'Títol', 580, 630, 160, 52, { onClick: () => game.goTitle() });

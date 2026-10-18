@@ -1,7 +1,11 @@
 'use strict';
 const GameState = {
-  /** `level`: CONFIG.LEVELS id (unknown or disabled: Standard). `species`: the human's ([C64] computers are Mechtrons). */
-  create({ seed, level = 'standard', species = 'mechtron', playerName = 'Roger', colorId = 'yellow' }) {
+  /**
+   * `level`: CONFIG.LEVELS id (unknown or disabled: Standard). `humans`: the human seats [{ name, colorId, species }] (0-4; [] = the
+   * computer demo); without it, one human from `playerName` / `colorId` / `species`. [C64][manual] humans take the first seats
+   * (p0 = P1 ...), the computers fill the rest as Mechtrons with the colours left over. A colour already taken goes to the first free one.
+   */
+  create({ seed, level = 'standard', species = 'mechtron', playerName = 'Roger', colorId = 'yellow', humans = null }) {
     if (!CONFIG.LEVELS[level] || CONFIG.LEVELS[level].disabled) level = 'standard';
     const rules = levelRules({ level });
     const rng = new SeededRNG(seed);
@@ -9,10 +13,20 @@ const GameState = {
     // [Atari code] Tournament: the hidden crystite deposits (generated only where crystite plays, so other levels keep their PRNG stream).
     const crystite = rules.crystite ? CrystiteSystem.create(plots, rng) : null;
     const palette = CONFIG.PLAYER_COLORS;
-    const human = palette.find((c) => c.id === colorId) || palette[0];
-    const rest = palette.filter((c) => c.id !== human.id);
-    const players = [PlayerState.create('p0', playerName || 'Roger', human.hex, true, null, CONFIG.SHAPES[0], speciesById(species).id, rules.startInv)];
-    CONFIG.AI_NAMES.forEach((ai, i) => players.push(PlayerState.create(`p${i + 1}`, ai.name, rest[i].hex, false, ai.profile, CONFIG.SHAPES[i + 1], 'mechtron', rules.startInv)));
+    const seats = (humans || [{ name: playerName, colorId, species }]).slice(0, 4);
+    const used = [];
+    const players = seats.map((h, i) => {
+      const want = palette.find((c) => c.id === h.colorId);
+      const col = want && !used.includes(want.id) ? want : palette.find((c) => !used.includes(c.id));
+      used.push(col.id);
+      const name = (h.name && String(h.name).trim()) || (i === 0 ? 'Roger' : `Jugador ${i + 1}`);
+      return PlayerState.create(`p${i}`, name, col.hex, true, null, CONFIG.SHAPES[i], speciesById(h.species || 'mechtron').id, rules.startInv, i);
+    });
+    const rest = palette.filter((c) => !used.includes(c.id));
+    CONFIG.AI_NAMES.slice(0, 4 - seats.length).forEach((ai, k) => {
+      const i = seats.length + k;
+      players.push(PlayerState.create(`p${i}`, ai.name, rest[k].hex, false, ai.profile, CONFIG.SHAPES[i], 'mechtron', rules.startInv));
+    });
     // [Atari code][manual] Tournament: the computers get an extra $200 ($1200); humans keep their species' money.
     if (rules.aiCash) players.filter((p) => !p.isHuman).forEach((p) => { p.cash = p.score = p.lastTurnNetWorth = rules.aiCash; });
     const state = {

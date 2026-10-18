@@ -29,7 +29,7 @@ class ReportScreen {
       res.forEach((d) => { if (row.lost && row.lost[d.id] > 0) notes.push(`els pirates s'enduen ${row.lost[d.id]} de ${d.label.toLowerCase()} de la reserva`); });
       r.text(notes.join(' · ') || 'cap penalització', 100, y + 30, { size: 16, color: notes.length ? COL.bad : COL.dim, maxW: 1100 });
     });
-    r.button('rep-next', 'A les subhastes', 500, 640, 280, 50, { primary: true, onClick: () => game.skipPhase() });
+    if (!ReportScreen.drawWait(game, r)) r.button('rep-next', 'A les subhastes', 500, 640, 280, 50, { primary: true, onClick: () => game.skipPhase() });
   }
   drawTurn(game, r) {
     const s = game.state; const rk = game.rt.turnRank;
@@ -64,6 +64,22 @@ class ReportScreen {
     const surv = ScoringSystem.survival(s);
     r.text(`Patrimoni de la colònia: ${surv.combined} cr (cal ${surv.needCombined} al final del torn ${lastRound(s)})`, 70, 530, { size: 18, color: surv.survives ? COL.good : COL.amber, maxW: 1100 });
     (s.event && s.event.items || []).slice(0, 3).forEach((ev, i) => r.text(`${ev.scope === 'planet' ? 'Planetari' : 'Individual'}: ${ev.text}`, 70, 566 + i * 24, { size: 16, color: COL.dim, maxW: 1140, fit: true }));
-    r.button('rep-next', s.turn >= lastRound(s) ? 'Veure el resultat final' : 'Torn següent', 470, 646, 340, 52, { primary: true, size: 20, onClick: () => game.skipPhase() });
+    if (!ReportScreen.drawWait(game, r)) r.button('rep-next', s.turn >= lastRound(s) ? 'Veure el resultat final' : 'Torn següent', 470, 646, 340, 52, { primary: true, size: 20, onClick: () => game.skipPhase() });
+  }
+  /**
+   * [Atari code] "PRESS ALL PLAYER BUTTONS TO GO ON." with two or more humans: who has pressed, and the time left (Game.handOver).
+   * The button is P1's press (mouse / touch). Returns false when there is no such wait (one human: the classic button).
+   */
+  static drawWait(game, r) {
+    const w = game.turns.phaseData && game.turns.phaseData.wait; if (!w) return false;
+    const s = game.state; const left = Math.max(0, Math.ceil((CONFIG.HANDOVER.timeoutMs - w.ms) / 1000));
+    r.button('rep-next', 'Prem tots els botons dels jugadors per continuar', 70, 646, 560, 52, { primary: true, size: 18, onClick: () => game.skipPhase() });
+    game.humanIds().forEach((id, i) => {
+      const p = playerById(s, id); const ok = w.pressed.includes(id); const x = 650 + i * 140;
+      r.glyph(p.shape, x + 10, 672, 8, p.color, '#05070d');
+      r.text(`${ok ? '✔' : '…'} ${PlayerControls.button(p.keys)}`, x + 24, 662, { size: 16, color: ok ? COL.good : COL.dim, maxW: 112 });
+    });
+    r.text(`${left} s`, 1210, 662, { size: 16, color: COL.dim, align: 'right' });
+    return true;
   }
 }

@@ -7,7 +7,8 @@ const HELP_LINES = [
   ['Producció', 'Els RUCs de menjar i smithore gasten 1 energia de la reserva; els d\'energia s\'autoalimenten. +1 si un veí teu fa el mateix, +1 per cada grup de 3 parcel·les teves iguals. La base és una mitjana: la collita varia.'],
   ['Estat', 'Després de menjar es malbarata el 50% del menjar i el 25% de l\'energia que queden de reserva (smithore, només per sobre de 50). La collita nova no es malbarata.'],
   ['Subhasta', 'Primer declara comprador, venedor o fora abans que s\'acabi el comptador; després el rol queda fix i només mous el preu. Tracte quan les línies es toquen 0,5 s.'],
-  ['Controls', 'Tab focus · Enter/Espai acció · Esc pausa. Declaració: ↑/→ venedor, ↓/← comprador, Espai fora. Subhasta: ↑/↓ preu (Maj ×3). Tacte: fletxes en pantalla i botó Acció.']
+  ['Controls', 'Tab focus · Enter/Espai acció · Esc pausa. Declaració: ↑/→ venedor, ↓/← comprador, Espai fora. Subhasta: ↑/↓ preu (Maj ×3). Tacte: fletxes i Acció.'],
+  ['Diversos jugadors', 'J1 fletxes+Enter · J2 WASD+Q · J3 IJKL+U · J4 numèric 8456+0 · comandament: el primer botó. Terra i subhastes alhora; desenvolupament un per un.']
 ];
 class HelpOverlay {
   draw(game, r) {
@@ -20,7 +21,7 @@ class HelpOverlay {
       r.text(h, col[k], ys[k], { size: 18, color: COL.cyan });
       ys[k] += 24 + r.wrap(t, col[k], ys[k] + 24, 520, 22, { size: 16 }) + 12;
     });
-    r.button('help-close', 'Tanca', 540, 626, 200, 46, { primary: true, onClick: () => game.toggleHelp() });
+    r.button('help-close', 'Tanca', 100, 626, 200, 46, { primary: true, onClick: () => game.toggleHelp() });
   }
 }
 
