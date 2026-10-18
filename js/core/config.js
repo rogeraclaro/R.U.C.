@@ -333,13 +333,6 @@ const AI_PROFILES = deepFreeze({
 
 const ASSET_LIST = Object.freeze([
   { name: 'bg_irata_sky', frames: 1, fb: '#141c3a', label: 'CEL' },
-  { name: 'map_ground_base', frames: 1, fb: '#2a2530', label: 'TERRA' },
-  { name: 'tile_river_01', frames: 1, fb: '#1f5c73', label: 'RIU' },
-  { name: 'tile_river_02', frames: 1, fb: '#1a6a80', label: 'RIU' },
-  { name: 'tile_plain_01', frames: 1, fb: '#4a4a6a', label: 'PLANA' },
-  { name: 'tile_plain_02', frames: 1, fb: '#514f70', label: 'PLANA' },
-  { name: 'tile_mountain_01', frames: 1, fb: '#3a2c2a', label: 'MUNT.' },
-  { name: 'tile_mountain_02', frames: 1, fb: '#2c3a44', label: 'MUNT.' },
   { name: 'colony_store', frames: 1, fb: '#4a4238', label: 'BOTIGA' },
   { name: 'colony_habitat', frames: 1, fb: '#33405a', label: 'HÀBITAT' },
   { name: 'ruc_idle', frames: 1, fb: '#4fd1e6', label: 'RUC' },

@@ -203,7 +203,7 @@ ruc/
 │   ├── state/        models de dades: Plot, PlayerState, StoreState, ResourceLedger + RucAudit, GameState
 │   ├── systems/      lògica pura: torn, botiga, terra (i oficina de terres), producció, consum, liquidació, esdeveniments,
 │   │                 puntuació, pub, Wampus, desat, subhasta, subhasta de terres, IA, ordre i caminada de desenvolupament (poble)
-│   ├── ui/           hud.js (colors, formats, Hud), species-art.js, overlays.js, input.js, controls.js (tecles per jugador i comandaments), audio.js, renderer.js
+│   ├── ui/           hud.js (colors, formats, Hud), species-art.js, map-art.js (mapa procedural), overlays.js, input.js, controls.js (tecles per jugador i comandaments), audio.js, renderer.js
 │   ├── screens/      title, setup, map, production, report, auction, land-auction, gameover
 │   ├── tests.js      runSelfTests (?test=1)
 │   └── game.js       Game + arrencada
@@ -221,14 +221,20 @@ escala cada imatge a la mida lògica i deriva l'amplada dels fotogrames de les t
 (`ruc_walk_strip`: 8 fotogrames, `colonists_strip`: 4, `event_cards_strip`: 8). Si un fitxer falta o falla,
 `AssetLoader` dibuixa un substitut amb Canvas (color + patró + etiqueta) i la partida continua jugable.
 
+**El mapa no fa servir cap PNG.** El terra continu, la franja del riu, els cims de les muntanyes (1-3 per parcel·la: el nombre de cims
+és la riquesa en smithore), el poble i la quadrícula es dibuixen amb Canvas (`js/ui/map-art.js`) en una capa fora de pantalla que només
+es refà quan canvia el terreny (p. ex. un lliscament del terratrèmol planetari). Els detalls (còdols, mates, cràters, meandres) surten
+d'un hash de la llavor de la partida i de les coordenades de la parcel·la, **no** del generador aleatori del joc: cada partida es veu
+diferent, però sempre igual en tornar-la a carregar. `map_ground_base` i els sis `tile_*` es conserven a `assets/` però ja no es carreguen.
+
 Mides reals dels PNG actuals (l'especificació en demanava d'altres; res no depèn d'aquestes mides):
 
 | Asset | Mida actual |
 |---|---|
 | `bg_irata_sky`, `auction_hall_bg` | 1376×768 |
-| `map_ground_base` | 1392×768 |
+| `map_ground_base` (no es carrega) | 1392×768 |
 | `colony_store`, `colony_habitat` | 1264×848 |
-| `tile_*`, `resource_*`, `module_*`, `ruc_idle`, `ui_frame_9slice` | 1024×1024 |
+| `tile_*` (no es carreguen), `resource_*`, `module_*`, `ruc_idle`, `ui_frame_9slice` | 1024×1024 |
 | `colonists_strip` | 2064×512 (4 × 516) |
 | `event_cards_strip`, `ruc_walk_strip` | 2928×352 (8 × 366) |
 

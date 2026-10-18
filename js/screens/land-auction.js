@@ -99,7 +99,7 @@ class LandAuctionScreen {
     ctx.drawImage(MapLayer.get(game), X, Y, W, T * CONFIG.ROWS);
     s.plots.forEach((p) => {
       if (!p.ownerId) return;
-      const o = playerById(s, p.ownerId); ctx.strokeStyle = o.color; ctx.lineWidth = 3; ctx.strokeRect(X + p.x * T + 2, Y + p.y * T + 2, T - 4, T - 4);
+      const o = playerById(s, p.ownerId); ctx.strokeStyle = 'rgba(30,20,10,0.55)'; ctx.lineWidth = 5; ctx.strokeRect(X + p.x * T + 2, Y + p.y * T + 2, T - 4, T - 4); ctx.strokeStyle = o.color; ctx.lineWidth = 3; ctx.strokeRect(X + p.x * T + 2, Y + p.y * T + 2, T - 4, T - 4);
     });
     const plot = s.plots[la.lot.plotId]; const px = X + plot.x * T; const pyy = Y + plot.y * T;
     const pulse = 0.55 + 0.45 * Math.abs(Math.sin(game.now / 300));

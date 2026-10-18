@@ -1,37 +1,20 @@
 'use strict';
-/** Static map layer (ground + terrain tiles) cached in an offscreen canvas; ownership and RUCs are drawn per frame. */
+/**
+ * Static map layer (continuous ground, river band, mountain peaks, town, grid, terrain chips: see MapArt), cached in an offscreen
+ * canvas and rebuilt only when the terrain changes. Ownership, RUCs and every other overlay are drawn per frame on top.
+ */
 const MapLayer = {
   key: '',
   canvas: null,
   build(game) {
-    const a = game.assets; const T = CONFIG.TILE;
+    const T = CONFIG.TILE;
     const c = document.createElement('canvas'); c.width = CONFIG.COLS * T; c.height = CONFIG.ROWS * T;
-    const x = c.getContext('2d'); x.imageSmoothingEnabled = false;
-    a.draw(x, 'map_ground_base', 0, 0, c.width, c.height);
-    game.state.plots.forEach((p) => {
-      if (p.terrain === TERRAIN.TOWN) {
-        a.draw(x, 'tile_river_01', p.x * T, p.y * T, T, T);
-        a.drawContain(x, 'colony_store', p.x * T + 4, p.y * T + 4, T - 8, T - 30);
-        x.fillStyle = 'rgba(6,9,18,0.8)'; x.fillRect(p.x * T + 3, p.y * T + T - 24, T - 6, 21);
-        x.fillStyle = COL.amber; x.font = 'bold 16px ui-monospace, Menlo, Consolas, monospace'; x.textBaseline = 'middle'; x.textAlign = 'center';
-        x.fillText('POBLE', p.x * T + T / 2, p.y * T + T - 13);
-        return;
-      }
-      const name = p.terrain === TERRAIN.RIVER ? (p.y % 2 ? 'tile_river_02' : 'tile_river_01')
-        : p.terrain === TERRAIN.PLAIN ? ((p.x * 3 + p.y) % 2 ? 'tile_plain_02' : 'tile_plain_01')
-          : (p.richness >= 2 ? 'tile_mountain_02' : 'tile_mountain_01');
-      a.draw(x, name, p.x * T, p.y * T, T, T);
-      // Terrain must never rely on colour alone: initial + richness pips are drawn on the tile.
-      x.fillStyle = 'rgba(6,9,18,0.72)'; x.fillRect(p.x * T + 3, p.y * T + T - 24, p.terrain === TERRAIN.MOUNTAIN ? 56 : 30, 21);
-      x.fillStyle = COL.text; x.font = 'bold 16px ui-monospace, Menlo, Consolas, monospace'; x.textBaseline = 'middle'; x.textAlign = 'left';
-      x.fillText(p.terrain === TERRAIN.RIVER ? 'R' : p.terrain === TERRAIN.PLAIN ? 'P' : 'M', p.x * T + 8, p.y * T + T - 13);
-      for (let i = 0; i < p.richness; i++) { x.fillStyle = COL.amber; x.fillRect(p.x * T + 26 + i * 12, p.y * T + T - 18, 8, 10); }
-    });
+    MapArt.paint(c.getContext('2d'), game.state, T);
     return c;
   },
   get(game) {
     // The terrain is part of the key: a planetquake slide changes it mid-game.
-    const k = `${game.state.seed}|${game.assets.settled}|${game.assets.failed.size}|${game.state.plots.map((p) => p.richness).join('')}`;
+    const k = MapArt.cacheKey(game.state);
     if (k !== this.key || !this.canvas) { this.canvas = this.build(game); this.key = k; }
     return this.canvas;
   }
@@ -126,6 +109,8 @@ class MapScreen {
       const { x, y } = this.plotRect(p); const T = CONFIG.TILE;
       if (p.ownerId) {
         const o = playerById(s, p.ownerId);
+        // A dark under-stroke keeps light owner colours (yellow, cyan) readable on the light ground.
+        ctx.strokeStyle = 'rgba(30,20,10,0.55)'; ctx.lineWidth = 6; ctx.strokeRect(x + 2, y + 2, T - 4, T - 4);
         ctx.strokeStyle = o.color; ctx.lineWidth = 4; ctx.strokeRect(x + 2, y + 2, T - 4, T - 4);
         r.glyph(o.shape, x + 14, y + 14, 9, o.color, '#05070d');
       }

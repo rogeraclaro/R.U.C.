@@ -93,6 +93,35 @@ function runSelfTests() {
     return !LandGrantSystem.assign(state, 'p0', 22) && !Plot.claimable(state.plots[22]) ? true : 'the town could be claimed';
   });
   t('Map: same seed generates the same map', () => eq(JSON.stringify(Plot.generateMap(new SeededRNG('same'))), JSON.stringify(Plot.generateMap(new SeededRNG('same')))));
+  t('Map art: decoration/peak hash is pure (same seed+plot = same art, other seed differs) and never touches the game PRNG', () => {
+    const { state: s } = fresh('art'); const before = JSON.stringify(s); const T = CONFIG.TILE;
+    const art = (seed) => JSON.stringify(s.plots.map((p) => [MapArt.decor(seed, p, T), MapArt.peaks(seed, p, T)]).concat([MapArt.riverEdge(seed, 123, T)]));
+    const a = art(s.seed);
+    if (a !== art(s.seed)) return 'art not deterministic';
+    if (a === art('other')) return 'art ignores the seed';
+    MapArt.cacheKey(s);
+    return eq(JSON.stringify(s), before, 'state (incl. rngState) changed by map art');
+  });
+  t('Map art: one peak sprite per level of richness, inside its plot; plains/river/town get none; river band stays in its column', () => {
+    const T = CONFIG.TILE;
+    for (const seed of ['a', 'b', 'c', 'd']) {
+      for (const p of fresh(seed).state.plots) {
+        const k = MapArt.peaks(seed, p, T);
+        if (k.length !== (p.terrain === TERRAIN.MOUNTAIN ? p.richness : 0)) return `plot ${p.id}: ${k.length} peaks for richness ${p.richness}`;
+        if (k.some((q) => q.x - q.w / 2 < 0 || q.x + q.w / 2 > T || q.y - q.h < 0 || q.y > T)) return `plot ${p.id}: peak outside the plot`;
+      }
+      for (let y = 0; y < CONFIG.ROWS * T; y += 7) { const e = MapArt.riverEdge(seed, y, T); if (e.l < 4 || e.r > T - 4 || e.r - e.l < T * 0.3) return `river edge off at y ${y}`; }
+    }
+    return true;
+  });
+  t('Map art: the cached layer key follows the terrain (a planetquake slide changes it; owners and RUCs do not)', () => {
+    const { state: s } = fresh('slide'); const k0 = MapArt.cacheKey(s);
+    LandGrantSystem.assign(s, 'p0', s.plots.find((p) => p.terrain === TERRAIN.PLAIN).id);
+    if (MapArt.cacheKey(s) !== k0) return 'owner changed the key';
+    let slid = null; for (let i = 0; i < 20 && !slid; i++) slid = EventSystem.slide(s, new SeededRNG(`q${i}`));
+    if (!slid) return 'no slide happened';
+    return MapArt.cacheKey(s) !== k0 ? true : 'slide kept the key';
+  });
 
   /* ---------- P0.2 production ---------- */
   t('Production table: [manual] averages river/plain/mountain food 4/2/1, energy 2/3/1, smithore 0/1/1+peaks', () => {
