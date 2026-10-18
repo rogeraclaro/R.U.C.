@@ -1,0 +1,9 @@
+html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
+body { display: flex; align-items: center; justify-content: center; }
+#game {
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: min(100vh, calc(100vw * 9 / 16));
+  background: #0a0e1a; touch-action: none; outline: none; display: block;
+  image-rendering: pixelated; image-rendering: crisp-edges;
+}
+#sr { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }

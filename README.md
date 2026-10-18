@@ -104,10 +104,23 @@ a l'estat (`settlement`) i no es torna a executar mai.
 
 ```text
 ruc/
-├── index.html        tot el joc (seccions JS en l'ordre de l'especificació)
+├── index.html        markup + full d'estil + <script> en ordre de càrrega
+├── css/style.css
+├── js/               scripts clàssics (no mòduls ES, perquè funcioni amb file://)
+│   ├── core/         config.js (CONFIG, FEATURES, enums, RESOURCE_DEFS, EVENT_DEFS…), rng.js, assets.js
+│   ├── state/        models de dades: Plot, PlayerState, StoreState, ResourceLedger + RucAudit, GameState
+│   ├── systems/      lògica pura: torn, botiga, terra, producció, consum, liquidació, esdeveniments,
+│   │                 puntuació, desat, subhasta, IA, ordre i caminada de desenvolupament (poble)
+│   ├── ui/           hud.js (colors, formats, Hud), overlays.js, input.js, audio.js, renderer.js
+│   ├── screens/      title, setup, map, production, report, auction, gameover
+│   ├── tests.js      runSelfTests (?test=1)
+│   └── game.js       Game + arrencada
 ├── README.md
 └── assets/           22 PNG estàtics (sense canvis)
 ```
+
+Els scripts comparteixen l'àmbit global (`const`/`class` de nivell superior), així que l'ordre dels `<script>` a
+`index.html` importa: `core/config.js` primer, `tests.js` abans de `game.js` (l'arrencada crida `runSelfTests`).
 
 ## Substituir assets
 
