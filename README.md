@@ -16,14 +16,20 @@ Funciona sense connexió. No hi ha CDN, npm, bundler ni IA en temps d'execució.
 ## El torn
 
 1. **Adjudicació de terra**: cursa en temps real, una sola passada.
-2. **Desenvolupament**, un colon rere l'altre per ordre de patrimoni (del líder a l'últim; al revés si al corral queden menys de 7 RUCs).
-   Abans del torn de cada colon hi ha un 25 % d'esdeveniment individual. El teu torn és **a peu**: vegeu més avall.
-3. **Esdeveniment planetari** (abans de la producció).
+2. **Desenvolupament**, un colon rere l'altre per ordre de patrimoni (del líder a l'últim; al revés si al corral queden 7 RUCs o menys).
+   El temps de cada colon depèn del menjar que té a l'inici del seu torn (vegeu més avall).
+   Abans del torn de cada colon (humà o IA) hi ha un 27,5 % (22/80) d'**esdeveniment personal**, un dels 22 de l'original; la targeta
+   surt abans de l'avís d'inici del torn. El teu torn és **a peu**: vegeu més avall.
+3. **Esdeveniment planetari**: un per torn als torns 1–11, tret d'una bossa sense reposició; al torn 12, «La nau ha tornat!». Taques solars,
+   pluja àcida, terratrèmol, meteorit i radiació actuen abans de la producció; plaga, pirates i incendi, després de mostrar-la.
 4. **Producció i estat**: consum, malbaratament de la reserva i collita nova (pantalla «Estat del torn»).
 5. **Subhastes**: smithore → menjar → energia. Cadascuna té una **declaració** cronometrada (comprador / venedor / fora) i després el rol queda fix.
-6. **Informe del torn**: la botiga fabrica RUCs amb el smithore que ha comprat (2 per RUC, disponibles el torn següent).
+6. **Informe del torn**: la botiga recalcula els preus per oferta i demanda i fabrica RUCs amb el smithore que té (2 per RUC, fins a
+   14 al corral, disponibles el torn següent).
 
 Al final, la colònia ha de sumar **60.000 cr** de patrimoni; si no hi arriba, ha fracassat i no hi ha *First Founder* (la classificació es mostra igualment).
+Si en acabar un torn no queda cap RUC de menjar (o d'energia) ni cap unitat de menjar (o d'energia) enlloc, la partida s'acaba a l'instant:
+«La colònia ha fracassat per una manca total de menjar!» (o «d'energia»).
 
 ## Desenvolupament a peu
 
@@ -32,6 +38,10 @@ desenvolupament no comencen fins que s'acaba.
 
 El colon apareix al poble (casella central del mapa). Amb les fletxes (o el control tàctil de la dreta del panell) camina en temps real;
 el rellotge corre sempre, també mentre camines o estàs parat.
+
+**Temps** ([codi Atari], [C64]): `10 + floor(91 × min(1, menjar / necessitat))` unitats de 28 fotogrames PAL (50,125 Hz). Amb prou menjar,
+101 unitats ≈ 56,4 s; sense menjar, 10 unitats ≈ 5,6 s. Es compta el menjar que tens quan comença el teu torn (es menja després, a la
+producció). És igual a totes les dificultats; el factor d'espècie (Flapper 9/7, Humanoid 5/7) està preparat però val 1 mentre no hi hagi espècies.
 
 - **Corral** i **tallers** de menjar, energia i smithore: el teu colon **es queda a la porta**; camina fins allà i empeny-hi uns
   instants (fregar-la de passada no compta) perquè el RUC entri sol fins al taulell interior (un anell el marca) i torni, una mica
@@ -72,7 +82,7 @@ rellotge del joc. A la pantalla final, **Repetir llavor** i **Nova llavor**. Amb
 
 ## Desat
 
-Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **2**) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
+Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **4**: inclou la bossa d'esdeveniments planetaris i els esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
 **Continuar** al títol reprèn a la fase desada.
 
 «Desa i surt al títol» (menú de pausa) escriu un desat exacte a les fases **represables**: cursa de terra, desenvolupament (posició, RUC que
@@ -80,7 +90,7 @@ portes, rellotge, ordre i esdeveniments ja sortejats) i subhastes (declaració o
 l'últim desat de frontera, perquè tornar-hi a mitja fase podria aplicar-ne els efectes dues vegades. La liquidació del torn queda desada
 a l'estat (`settlement`) i no es torna a executar mai.
 
-**Desats antics:** un desat de l'esquema 1 (regles anteriors: sense poble, amb deute de fam, etc.) **no es migra**: el joc avisa al títol que
+**Desats antics:** un desat dels esquemes 1 a 3 (regles anteriors: estocs inicials, preus, temps, patrimoni i esdeveniments) **no es migra**: el joc avisa al títol que
 és d'una versió anterior amb unes altres regles i l'esborra. Un desat malmès també s'avisa. Cap desat incompatible s'accepta en silenci.
 
 ## Paràmetres d'URL (proves i depuració)
@@ -171,6 +181,8 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 
 - **[manual]** EA/Ozark *M.U.L.E. Player's Guide* (1983), https://www.mocagh.org/ea/mule-manual.pdf (transcripció C64: https://project64.c64.org/Games/MULE10.TXT).
 - **[targeta]** *Commodore 64 Command Summary*, https://mocagh.org/ea/mule-refcard.pdf (malbaratament).
+- **[codi Atari]** desassemblatge comentat de l'original d'Atari i l'anàlisi de Kroah (`docs/research/mechanics.md`; al codi, `[Atari code]`).
+- **[C64]** observat en un C64 PAL emulat amb VICE (`docs/research/emulator-c64.md`). Té prioritat sobre totes les altres fonts.
 - **[secundària]** C64-Wiki / Planet M.U.L.E. (recreació posterior): només per a descripcions qualitatives, mai com a constant del C64.
 - **PENDENT DE VERIFICAR**: valor provisional vigent a R.U.C., no confirmat per al C64. Al codi porta l'etiqueta `[PROVISIONAL]`.
 
@@ -184,60 +196,71 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | Corba d'aprenentatge: +1 a cada parcel·la per cada grup complet de 3 parcel·les pròpies del mateix bé, encara que no es toquin | manual | `learningBonus` |
 | Només els RUCs no energètics gasten 1 energia de la reserva; els d'energia s'autoalimenten; l'energia nova no alimenta res fins al torn següent | manual | `ProductionSystem.activation` |
 | La fam no costa diners: només redueix el temps de desenvolupament | manual (el menjar determina el temps) | deute eliminat |
-| Botiga inicial 16 menjar / 16 energia / 0 smithore; 16 RUCs al corral | manual | `CONFIG.STORE_START`, `RUC_START` |
-| 2 smithore venuts a la botiga = 1 RUC, disponible després d'un torn sencer; sense reposició gratuïta | manual | `StoreSystem.betweenTurns` |
-| Equip: menjar 25, energia 50, smithore 75 | manual | `CONFIG.MODULE_COST` |
-| Preus de botiga: mínims 15 / 10 / 14, sostre 265 | manual (text) | `RESOURCE_DEFS` |
+| Inventari inicial de cada colon: 4 menjar, 2 energia | codi Atari, C64 | `CONFIG.START_INV` |
+| Botiga inicial 8 menjar / 8 energia / 8 smithore; 14 RUCs al corral (el manual en diu 16) | codi Atari, C64 | `CONFIG.STORE_START`, `RUC_START` |
+| Entre torns la botiga fabrica min(14 − corral, smithore / 2) RUCs, 2 smithore cadascun; corral màxim 14; sense reposició gratuïta | codi Atari | `StoreSystem.betweenTurns`, `CONFIG.RUC_MAX` |
+| Equip: menjar 25, energia 50, smithore 75 | manual, C64 | `CONFIG.MODULE_COST` |
+| Menjar necessari per torn: 3 (torns 1-4), 4 (5-8), 5 (9-12) | codi Atari, C64 | `CONFIG.FOOD_NEED` |
+| Temps de desenvolupament: 10 + floor(91 × min(1, menjar/necessitat)) unitats de 28 fotogrames PAL (≈ 56,4 s amb prou menjar) | codi Atari, C64 | `ConsumptionSystem.devUnits`, `humanTimeMs` |
+| Escassetat d'energia: per cada unitat que falta, un RUC no energètic triat a l'atzar (PRNG sembrat) no produeix | codi Atari | `ProductionSystem.activation` |
+| Variació de la collita (Standard): −1 / 0 / +1 al 16 / 68 / 16 % (±2 ≈ 0,1 %), retallada a 0..8 | codi Atari | `ProductionSystem.variation`, `binomialStep` |
+| Preu de botiga P: inicial menjar 30, energia 25, smithore 50; després de cada subhasta amb operacions, P = preu mitjà operat | codi Atari, C64 | `state.storePrice`, `StoreSystem.afterAuction` |
+| La botiga compra / ven: menjar i energia a P − 15 / P + 20, smithore a P / P + 35 (torn 1: smithore 50/85, menjar 15/50, energia 10/45) | codi Atari, C64 | `StoreSystem.bid/ask` |
+| Oferta i demanda: P × (0,25 + 0,75 × demanda/oferta), quocient en vuitens; smithore amb quocient entre 0,25 i 3, mínim provisional 50 i pas aleatori de 7 × binomial (−28..+28); mínims 30 / 25 / 20, sostre 250 | codi Atari | `StoreSystem.updatePrices`, `supplyDemand`, `limit` |
+| Preu del RUC: 2 × preu del smithore arrodonit avall a desenes (100 al començament) | codi Atari, C64 | `StoreSystem.rucPrice` |
 | Sense estoc a la botiga, el preu entre colons no té sostre | manual (Standard) | `AuctionEngine.playerMax` |
 | Retorn al corral: preu sencer del robot, mai l'equip; temps esgotat portant-lo o Acció fora de la casa: fuig | manual | `DevWalk`, `StoreSystem.refundRuc` |
 | Corral → taller → casa de la parcel·la, a peu, amb el rellotge corrent; «cal entrar-hi del tot i sortir» | manual | `DevWalk`, `TOWN` |
 | Una sola passada a la cursa de terra; empat per menys patrimoni | manual | `LandRace.endSweep` |
-| Desenvolupament del líder a l'últim; al revés si al corral hi ha menys de 7 RUCs | manual | `DevOrder` |
+| Desenvolupament del líder a l'últim; al revés si al corral hi ha 7 RUCs o menys (el manual diu «menys de 7») | manual, codi Atari | `DevOrder` |
 | Subhastes smithore → (crystite) → menjar → energia, amb declaració cronometrada; després el rol és fix | manual | `auctionResources`, `AuctionEngine.stage` |
 | Empat a igual preu: guanya el colon amb menys patrimoni; la botiga, després dels colons | manual | `AuctionEngine._order` |
 | Preu de l'operació on es troben les línies (el marcador que ja hi era) | manual | `AuctionEngine._tradePrice` |
-| Esdeveniment individual: 25 % per colon i torn; el líder mai rep bona sort, l'últim mai mala | manual | `EventSystem.rollIndividual` |
-| Pirates (Standard): roben tot el smithore dels colons (no crystite) | manual | `EventSystem.build` |
+| Esdeveniments personals: els 22 de l'original en el mateix ordre i amb els mateixos pesos; 27,5 % (22/80) a l'inici del torn de cada colon (humans i IA); cada un un cop per partida per a tothom; si el triat no val es prova el de sota (circular) fins a 20 cops | codi Atari, C64 (mateixos textos i ordre) | `EVENT_DEFS`, `EventSystem.rollIndividual`, `search` |
+| El 1r mai rep un esdeveniment bo i els **dos últims** mai un de dolent (classificació de l'últim resum, empats a l'atzar) | codi Atari | `EventSystem.eligible`, `rankPlayers` |
+| Import = \|pes\| × 25 × (floor(torn / 4) + 1); per RUC als de mineria, energia i menjar; els del RUC demanen tenir-ne algun d'instal·lat; una penalització que no es pot pagar s'anul·la en silenci | codi Atari | `EventSystem.amount`, `precondition`, `affordable` |
+| Colon no líder amb 0 de menjar: rep el paquet (3 menjar, 2 energia) en lloc de l'esdeveniment triat | codi Atari | `EventSystem.rollIndividual` |
+| Parcel·la perduda = la pròpia amb l'índex més alt (amb el seu RUC); parcel·la extra = una lliure a l'atzar | codi Atari | `EventSystem.build` |
+| Planetaris: un per torn 1–11 d'una bossa sense reposició (plaga 3, pirates 2, pluja àcida 3, terratrèmol 3, taques solars 3, meteorit 2, radiació 2, incendi 2); el tiquet es gasta encara que no hi hagi objectiu; torn 12 «La nau ha tornat!» | codi Atari | `EventSystem.drawPlanet`, fases `PLANET_EVENT` / `PLANET_EVENT_AFTER` |
+| Taques solars +3 d'energia per parcel·la (màx. 8); pluja àcida: fila del núvol menjar +4 / energia −2, la resta +1 / −1 (0..8); terratrèmol: mineria a la meitat | codi Atari | `ProductionSystem.applyEvents` |
+| Meteorit: parcel·la que no sigui poble ni riu; en destrueix el RUC i hi deixa un dipòsit de crystite (`hiddenDeposit` = 4, per a la Fase B); el text del crystite només surt al Torneig | codi Atari | `EventSystem.build` |
+| Radiació (abans de la producció): fuig un RUC del 1r o 2n; plaga (després): una parcel·la de menjar amb producció del 1r o 2n la perd tota | codi Atari | `EventSystem.build`, `scanPlots` |
+| Pirates (Standard, després de la producció): tot el smithore dels colons **i de la botiga**, i la producció de smithore del torn; incendi: la botiga es queda sense menjar, energia ni smithore | codi Atari, manual | `EventSystem.build` |
 | Parcel·la = 500; objectiu de colònia 60.000 sense mínim per colon; sense First Founder si fracassa | manual | `ScoringSystem`, `Game.finish` |
+| Patrimoni: efectiu + béns al preu P de la botiga + 500 per parcel·la + per cada RUC instal·lat el cost de l'equip + 35 | codi Atari | `ScoringSystem.breakdown`, `CONFIG.RUC_WORTH` |
+| Fracàs immediat si no hi ha cap RUC de menjar (o d'energia) i no en queda cap unitat enlloc (colons + botiga) | codi Atari | `ScoringSystem.colonyFailure`, fase `NEXT` |
 
 ### Valors provisionals i proves pendents
 
 | Regla | Font | Implementació actual (provisional) | Confiança | Prova pendent |
 |---|---|---|---|---|
-| Fórmula de preus de botiga | manual: «oferta, demanda i últims preus», sense fórmula | `base × clamp(objectiu/estoc, 0,55, 2,2)`, marge ±10 %, tancament de marge després de 5 s | baixa | Registrar preus de compra/venda de la botiga per estoc en emulador (VICE) torn a torn |
-| Preu del RUC | manual: depèn dels RUCs disponibles i de parcel·les sense desenvolupar; exemple de 100 $ | 100 amb corral ple, +10 per RUC que falta, màx. 200; no té en compte les parcel·les buides | baixa | Anotar el preu del corral amb 16…0 RUCs i diferents parcel·les buides |
-| Límit de compra de la botiga (24 u) i màxim del corral (16) | no consten | `storeBuyCap` 24, `RUC_MAX` 16 | baixa | Vendre smithore/menjar a la botiga fins que deixi de comprar; comptar el corral després de molts torns de smithore |
-| Consum de menjar per torn | no consta | 2 (torns 1-4), 3 (5-8), 4 (9-12) | baixa | Llegir la «línia crítica» de menjar a l'estat de subhasta cada torn |
-| Segons de desenvolupament i penalització de fam | manual: el menjar determina el temps; Flapper/Humanoid més/menys temps | 90/60/45 s segons dificultat; −25 % per unitat que falta; mínim 15 s | baixa | Cronometrar la barra de temps amb 0, 1, 2… unitats de menjar en emulador |
+| Moment de l'actualització de preus per oferta i demanda | codi Atari: la fórmula és segura, quan s'executa no | un cop al final de cada torn (després de les subhastes i abans de fabricar RUCs), de manera que el torn 1 obre als preus inicials com al C64; «producció» = collita d'aquell torn; necessitat d'energia = RUCs no energètics | mitjana | Registrar els preus de botiga torn a torn en emulador |
+| Arrodoniment de P × (0,25 + 0,75 × quocient) | codi Atari: aritmètica entera, no transcrita | a la baixa | mitjana | Comparar preus de diversos torns en emulador |
+| Mecanisme de la «binomial» (variació de collita i pas del smithore) | codi Atari: distribució simètrica a [−6, 6) amb els percentatges publicats | suma de 12 uniformes − 6, arrodonida lluny de zero; el pas del smithore limitat a ±4 (−28..+28) | mitjana (la distribució reprodueix els percentatges) | Transcriure la rutina `calcBinomiale` |
+| Quins RUCs s'aturen si falta energia | codi Atari: «una explotació a l'atzar»; [FN] només entre les no energètiques | a l'atzar entre els RUCs no energètics, sense repetir | mitjana | Provocar escassetat amb diversos RUCs i mirar quins s'aturen |
+| Béns al resum de patrimoni | codi Atari: al preu P; C64: el resum #0 mostra GOODS 150 per a 4 menjar + 2 energia (amb P 30/25 serien 170) | al preu P | mitjana (contradicció oberta) | Llegir el resum de patrimoni en emulador amb inventaris diferents |
+| Moment de la comprovació del fracàs per manca total | codi Atari: la regla és segura, el moment no | al final de cada torn (fase `NEXT`) | mitjana | Provocar-ho en emulador |
+| Tancament del marge de la botiga | no és de l'original | després de 5 s sense operacions, la línia de compra / venda s'acosta a P un pas cada 2 s | — | Revisar amb el lot de subhastes |
+| Límit de compra de la botiga (24 u) | codi Atari: no se n'ha trobat cap (només el sostre de 255) | `storeBuyCap` 24 | baixa | Vendre a la botiga fins que deixi de comprar |
 | Durada de la declaració | manual: hi ha comptador, sense segons | 5 s | baixa | Cronometrar el *Declare Timer* |
-| Atzar de la producció | manual: la base és una mitjana i varia de 0 a 8 | mitjana + (a + b), a,b ∈ {−1,0,+1} sembrats; retallat a 0..8 | baixa | Registrar moltes collites d'una mateixa parcel·la (o desassemblar la rutina) |
-| Ordre dels modificadors | no consta | mitjana → variació → retall 0..8 → % d'esdeveniment (enter, arrodonit avall un cop) → parcel·les anul·lades; un esdeveniment pot superar 8 | baixa | Comparar collites amb pluja àcida / terratrèmol |
-| Quins RUCs s'aturen si falta energia | no consta (Planet diu aleatori) | prioritat fixa: menjar abans que smithore, després per número de parcel·la | baixa | Provocar escassetat amb diversos RUCs i mirar quins s'aturen |
+| Pluja àcida sobre un RUC de menjar sense energia | codi Atari: s'aplica a la producció de totes les parcel·les del tipus | també suma +1 de menjar (0 → 1) | mitjana | Provocar escassetat d'energia amb pluja àcida en emulador |
+| Lliscament de muntanya del terratrèmol: casos límit | codi Atari: 50 %, muntanya a l'atzar, esquerra o dreta, −1 / +1 nivell, destrueix els RUCs | si el costat triat és fora del mapa, riu, poble o ja té 3 cims, es prova l'altre; si cap no val, no llisca | baixa | Observar terratrèmols en emulador |
+| Moment del sorteig de la classificació dels esdeveniments | codi Atari: `ordersPlayer` del darrer resum, empats a l'atzar | sortejada un cop a l'inici de cada torn (PRNG sembrat) | mitjana | — |
 | Arrodoniment del malbaratament amb quantitats senars | no consta | a la baixa (3 menjar → en perd 1; 3 energia → 0) | mitjana | Guardar 3 i 5 unitats i llegir l'estat |
-| Valoració dels RUCs al patrimoni | exemple del manual: 1 parcel·la + 1 M.U.L.E. = LANDS 525 / 575 | robot 0 + cost de l'equip (25/50/75) | mitjana | Resum de patrimoni amb RUCs de cada tipus |
 | Retorn d'un RUC retirat d'una parcel·la | manual: «retorna'l al corral per 100 $» | es retorna el preu que es va pagar per aquell robot | mitjana | Retornar al corral un RUC comprat a un altre preu |
 | RUC sense equipar premut sobre la casa | no consta | no s'instal·la i no fuig (avís) | baixa | Provar-ho en emulador |
-| Exactament 7 RUCs al corral | manual: «<7» l'últim primer, «>7» l'últim al final | 7 → ordre normal | mitjana | Fer coincidir 7 RUCs i observar l'ordre |
 | Empat de patrimoni en l'ordre de desenvolupament i a la subhasta | no consta | ordre de jugador estable; a la subhasta, temps d'espera i clau sembrada | baixa | — |
-| Probabilitat i repetició d'esdeveniments planetaris; torns 1 i 12 | no consta | 45 % per torn, un com a màxim; cap negatiu als torns 1 i 12 (regla pròpia) | baixa | Estadística de moltes partides en emulador |
-| Magnituds dels planetaris | manual: només el sentit (pluja àcida: menjar ↑ energia ↓; terratrèmol: mines ↓) | pluja +35 % / −30 %, activitat solar +30 %, terratrèmol −25 % smithore (xifres heretades dels antics esdeveniments; la targeta ho indica) | baixa | Comparar collites abans/després de cada esdeveniment |
-| Plaga, radiació, incendi | secundària | plaga: una parcel·la de menjar no produeix; radiació: fuig un RUC instal·lat; incendi: la botiga perd tot l'estoc | mitjana | Confirmar-ne l'efecte exacte en emulador |
 | Velocitats de caminar, alentiment de riu/muntanya, geometria del poble | manual: riu i muntanya alenteixen, la diagonal és més ràpida | 0,12 px/ms al mapa (50 % a riu/muntanya), 0,2 px/ms al poble (retocat a 2/3 de l'anterior després de jugar-hi); poble amb carrer i passatge | baixa | Cronometrar recorreguts en emulador |
 | Instal·lació i fugida animades (pujada/afegit/baixada del RUC; espurneig i sortida corrents); casa = tota la parcel·la; avís de 3 s abans del torn humà | no són regles del C64, són decisions de disseny pròpies | 1800 ms d'instal·lació, 400+900 ms de fugida, avís 3000 ms (`CONFIG.WALK.installMs/fleeShuffleMs/fleeRunMs`, `CONFIG.DEV.countdownMs`) | — (no aplica: no és una afirmació de fidelitat) | — |
 | Botiga/corral: el colon es queda a la porta i només el RUC camina fins al taulell i torna | no és una regla del C64, és una decisió de disseny pròpia | cal empènyer 350 ms a la porta perquè comprometi la visita; 2200 ms de viatge del RUC (`CONFIG.WALK.doorHoldMs/visitMs`) | — (no aplica) | — |
 | Separació de marcadors després de cada unitat | l'original manté la unitat a unitat mentre les línies es toquen | R.U.C. separa 2 passos després de cada unitat i cal tornar a creuar 0,5 s | — | Decidir si es canvia (ajornat, vegeu sota) |
-| Preu mínim del smithore | manual contradictori: 14 $ (text) i 25–250 $ (contraportada) | 14 (com demana l'encàrrec) | mitjana | Veure el preu mínim real de la botiga en emulador |
 
 ### Pendents de Fase A (no implementats, sense evidència suficient)
 
-- **21 esdeveniments individuals del manual**: el manual només en dona el nombre. Mentre no se'n tingui el text i l'efecte exacte, el sorteig
-  (25 %, líder/últim) fa servir **4 esdeveniments propis de R.U.C.** (veta rica, avaria, ferralla, factura mèdica) marcats a la targeta com
-  «propi de R.U.C. (no C64)». Prova: capturar-los en emulador o extreure les cadenes del binari.
-- **Meteorit** (8è planetari): el manual no descriu el seu efecte al joc Standard; no s'implementa per no inventar-lo.
 - **Pub**: el manual confirma que acaba el torn i paga més com més temps queda, però no la fórmula. No s'ha implementat; «Acabar» no paga res.
 - **Espècies i hàndicaps**: Flapper (més diners i temps) i Humanoid (menys) consten al manual sense xifres (les de +600/−400 són d'una font
-  comunitària); les altres sis espècies no tenen atributs documentats. Pendent. També la divisió en unitats dels 300 $ inicials de menjar i energia
-  (ara 6 + 6).
+  comunitària); les altres sis espècies no tenen atributs documentats. Pendent (lot 3 del pla de fidelitat). El temps ja té el punt
+  d'enganxament per al factor d'espècie.
 
 ### Ajornat (fora d'aquest encàrrec)
 

@@ -32,39 +32,38 @@ const deepFreeze = (o) => {
 };
 
 /*
- * Source tags used in the comments below (README has the full table):
+ * Source tags used in the comments below (README has the full table; docs/research/ has the reports):
  *   [manual]  EA/Ozark Player's Guide 1983 (C64 etext MULE10.TXT)   [card]  C64 Command Summary card
+ *   [Atari code]  Kroah's commented disassembly of the Atari original + his write-up (docs/research/mechanics.md)
+ *   [C64]  observed on a PAL C64 in VICE (docs/research/emulator-c64.md); takes precedence over the other sources.
  *   [PROVISIONAL]  R.U.C. value, NOT verified for the C64: kept until an emulator capture or binary inspection confirms it.
  */
 const CONFIG = deepFreeze({
   W: 1280, H: 720, TURNS: 12, COLS: 9, ROWS: 5, RIVER_COL: 4, TOWN_ROW: 2,
   TILE: 96, MAP_X: 16, MAP_Y: 100,
   START_CASH: 1000,
-  // [manual] "$1000 in money and $300 worth of Food and Energy". The unit split is [PROVISIONAL].
-  START_INV: { food: 6, energy: 6, smithore: 0 },
-  // [manual] The store starts with 16 Food, 16 Energy and no Smithore; 16 M.U.L.E.s in the corral.
-  STORE_START: { food: 16, energy: 16, smithore: 0 },
-  // [manual] 2 Smithore sold to the store -> 1 M.U.L.E., built during a whole turn. RUC_MAX (corral cap) is [PROVISIONAL].
-  RUC_START: 16, RUC_MAX: 16, SMITHORE_PER_RUC: 2,
-  // [PROVISIONAL] RUC price: 100 with a full corral ([manual] Beginner example: $100), +10 per missing RUC, capped at 200.
-  RUC_BASE: 100, RUC_PRICE_STEP: 10, RUC_PRICE_MAX: 200,
+  // [Atari code][C64] Standard: every colonist starts with 4 Food and 2 Energy.
+  START_INV: { food: 4, energy: 2, smithore: 0 },
+  // [Atari code][C64] Standard: the store starts with 8 Food, 8 Energy, 8 Smithore and 14 M.U.L.E.s ([manual] says 16: code wins).
+  STORE_START: { food: 8, energy: 8, smithore: 8 },
+  // [Atari code] the corral holds at most 14; between rounds the store builds min(14 - corral, smithore / 2), 2 Smithore each.
+  RUC_START: 14, RUC_MAX: 14, SMITHORE_PER_RUC: 2,
   // [manual] Outfitting: Food $25, Energy $50, Smithore $75 (Crystite $100 is Phase B and not wired).
   MODULE_COST: { food: 25, energy: 50, smithore: 75 },
   // [manual] Every plot is worth $500 in the summary.
   PLOT_VALUE: 500,
-  // [PROVISIONAL] Worth of the robot itself, on top of its module's outfitting cost. The manual's summary example (1 plot with one
-  // M.U.L.E. -> LANDS 525 / 575) matches "500 + outfitting cost", i.e. 0 for the robot. Pending emulator check.
-  RUC_WORTH: 0,
-  // [PROVISIONAL] placeholders, not C64 values: food eaten per turn band, -25% development time per missing unit, 15 s floor.
-  FOOD_NEED: [{ from: 1, to: 4, n: 2 }, { from: 5, to: 8, n: 3 }, { from: 9, to: 12, n: 4 }],
-  SHORTAGE: { timePenaltyPct: 25, minTimeMs: 15000 },
+  // [Atari code] score: each installed M.U.L.E. adds $35 on top of its outfit cost (plot 500 + outfit + 35).
+  RUC_WORTH: 35,
+  // [Atari code][C64] food required for the current round: 3 in rounds 1-4, 4 in 5-8, 5 in 9-12.
+  FOOD_NEED: [{ from: 1, to: 4, n: 3 }, { from: 5, to: 8, n: 4 }, { from: 9, to: 12, n: 5 }],
   // [card] After consumption, 50% of the food left and 25% of the energy left spoil; ore only spoils above 50 units.
   // Rounding of odd amounts is [PROVISIONAL]: floor (the spoiled part is rounded down).
   SPOILAGE: { foodPct: 50, energyPct: 25, oreCap: 50 },
-  // [manual] Standard: the base is an average and real output "varies from 0 to 8 units". The distribution is [PROVISIONAL].
-  PRODUCTION: { min: 0, max: 8 },
-  // [manual] "No store price can go over $265" (the back cover summarises ranges up to $250).
-  STORE_PRICE_MAX: 265,
+  // [Atari code] per-plot output is clamped to 0..8. varAmp: Standard variation factor F = 0.5 (Beginner 0, Tournament 1).
+  PRODUCTION: { min: 0, max: 8, varAmp: 0.5 },
+  // [Atari code] store price P: floors food 30 / energy 25 / smithore 20 (smithore: 50 before its random step), ceiling 250.
+  // smithoreStep: the random term is 7 x binomial (amplitude 2), i.e. -28..+28.
+  STORE_PRICE: { max: 250, smithoreInterimMin: 50, smithoreStep: 7, smithoreStepMax: 4 },
   AUCTION: {
     // declareMs: [PROVISIONAL] length of the buyer/seller declaration (the manual has a Declare Timer but gives no seconds).
     // playerPriceMax: technical UI limit for colonist-to-colonist prices when the store is out of stock ([manual]: no rule cap).
@@ -77,14 +76,16 @@ const CONFIG = deepFreeze({
   // Land race: the game clock advances in fixed steps so the outcome never depends on the frame rate.
   // landClaimPauseMs: after every claim the cursor disappears this long (measured on the original: ~2.1 s). Same for all difficulties.
   LAND: { stepMs: 10, holdMs: 900, landClaimPauseMs: 2000 },
-  // individualPct: [manual] 25% chance for each colonist's turn. planetPct: [PROVISIONAL] (the manual gives no probability).
-  EVENTS: { planetPct: 45, individualPct: 25 },
+  // [Atari code] personal event: roll random[0..79], an event only if < 22 (27.5 %); search down at most 20 candidates;
+  // money unit 25 x (floor(round / 4) + 1).
+  EVENTS: { personalDie: 80, personalTries: 20, moneyUnit: 25 },
   // [manual] Standard: the colony must reach $60,000 in total. No per-colonist requirement.
   SURVIVAL: { combined: 60000 },
-  // [manual] "The last place player will move first if there are less than 7 M.U.L.E.s in the corral". Exactly 7 is unspecified.
+  // [Atari code] the order is reversed when the corral has 7 M.U.L.E.s or fewer ([manual] says "less than 7": code wins).
+  // unitFrames / palHz: [Atari code] one development time unit = 7 BTU = 28 frames; [C64] PAL runs at 50.125 Hz (101 units ~ 56.4 s).
   // countdownMs: not C64-sourced — a "get ready" warning shown before the human's development slot starts, so the walk and its
   // clock never begin while the player is still getting their bearings (see the modal in MapScreen.drawTurnCountdown).
-  DEV: { lowCorral: 7, countdownMs: 3000 },
+  DEV: { lowCorral: 7, countdownMs: 3000, unitFrames: 28, palHz: 50.125, baseUnits: 10, foodUnits: 91 },
   // Walking during development. Speeds/slow terrain [PROVISIONAL], not measured on the C64 yet.
   // [manual] river and mountains slow you down; diagonal is the fastest way to move (so the two axes are not normalised).
   // mapSpeed/townSpeed: 2/3 of the original PROVISIONAL values (0.18/0.3), per playtesting feedback, still PROVISIONAL.
@@ -97,9 +98,9 @@ const CONFIG = deepFreeze({
   // C64-sourced.
   WALK: { stepMs: 10, mapSpeed: 0.12, townSpeed: 0.2, slowPct: 50, doorHoldMs: 350, visitMs: 2200, installMs: 1800, fleeShuffleMs: 400, fleeRunMs: 900 },
   DIFFICULTY: {
-    relaxed: { label: 'Relaxada', reactMin: 700, reactMax: 1300, valuationErr: 15, minReserve: 2, humanTimeMs: 90000, landMsPerPlot: 500 },
-    colony: { label: 'Colònia', reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3, humanTimeMs: 60000, landMsPerPlot: 400 },
-    ruthless: { label: 'Implacable', reactMin: 180, reactMax: 500, valuationErr: 3, minReserve: 4, humanTimeMs: 45000, landMsPerPlot: 300 }
+    relaxed: { label: 'Relaxada', reactMin: 700, reactMax: 1300, valuationErr: 15, minReserve: 2, landMsPerPlot: 500 },
+    colony: { label: 'Colònia', reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3, landMsPerPlot: 400 },
+    ruthless: { label: 'Implacable', reactMin: 180, reactMax: 500, valuationErr: 3, minReserve: 4, landMsPerPlot: 300 }
   },
   PLAYER_COLORS: [
     { id: 'yellow', name: 'Groc', hex: '#f2c94c' }, { id: 'coral', name: 'Corall', hex: '#ff7a6b' },
@@ -110,8 +111,10 @@ const CONFIG = deepFreeze({
     { name: 'Bran', profile: 'conservative' }, { name: 'Vela', profile: 'industrial' },
     { name: 'Nox', profile: 'opportunist' }
   ],
-  // The key stays the same so an old (schema 1) save is detected and refused with an explicit message.
-  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 2, MAX_DT_MS: 50
+  // The key stays the same so an old (schema 1-2) save is detected and refused with an explicit message.
+  // Schema 3: original start stocks, store price P in the state, new food/time/score rules.
+  // Schema 4: the 22 original personal events (used flags) and the planetary event bag (state.events).
+  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 4, MAX_DT_MS: 50
 });
 
 /* Mutable on purpose: Phase B modules are wired behind these flags. */
@@ -124,13 +127,15 @@ const RESOURCE = Object.freeze({
 const TERRAIN = Object.freeze({ RIVER: 'river', PLAIN: 'plain', MOUNTAIN: 'mountain', TOWN: 'town' });
 const ROLE = Object.freeze({ BUYER: 'BUYER', SELLER: 'SELLER', OUT: 'OUT' });
 
-// minPrice: [manual] store minimums Food $15, Energy $10, Smithore $14 (the back cover says Smithore $25-250: the manual is
-// inconsistent, see README). maxPrice: [manual] store ceiling $265. basePrice / storeTargetStock: [PROVISIONAL] price formula inputs.
+// basePrice: [Atari code][C64] starting store price P (food 30, energy 25, smithore 50). priceFloor: [Atari code] lowest P.
+// storeBuyOff / storeSellOff: [Atari code][C64] the store buys at P - buyOff and sells at P + sellOff (food & energy -15/+20,
+// smithore 0/+35). minPrice / maxPrice: the auction's price window = floor - buyOff .. ceiling 250 + sellOff (marker bounds).
+// storeTargetStock: no longer used by the store price (kept for the generic market API).
 // Crystite is Phase B and deliberately left as it was.
 const RESOURCE_DEFS = deepFreeze({
-  food: { id: 'food', label: 'Menjar', icon: 'resource_food', module: 'module_food', enabled: true, basePrice: 30, minPrice: 15, maxPrice: 265, storeTargetStock: 16, auctionStep: 1, color: '#7bd66f' },
-  energy: { id: 'energy', label: 'Energia', icon: 'resource_energy', module: 'module_energy', enabled: true, basePrice: 25, minPrice: 10, maxPrice: 265, storeTargetStock: 16, auctionStep: 1, color: '#4fd1e6' },
-  smithore: { id: 'smithore', label: 'Smithore', icon: 'resource_smithore', module: 'module_smithore', enabled: true, basePrice: 50, minPrice: 14, maxPrice: 265, storeTargetStock: 12, auctionStep: 2, color: '#ff9a3c' },
+  food: { id: 'food', label: 'Menjar', icon: 'resource_food', module: 'module_food', enabled: true, basePrice: 30, priceFloor: 30, storeBuyOff: 15, storeSellOff: 20, minPrice: 15, maxPrice: 270, storeTargetStock: 16, auctionStep: 1, color: '#7bd66f' },
+  energy: { id: 'energy', label: 'Energia', icon: 'resource_energy', module: 'module_energy', enabled: true, basePrice: 25, priceFloor: 25, storeBuyOff: 15, storeSellOff: 20, minPrice: 10, maxPrice: 270, storeTargetStock: 16, auctionStep: 1, color: '#4fd1e6' },
+  smithore: { id: 'smithore', label: 'Smithore', icon: 'resource_smithore', module: 'module_smithore', enabled: true, basePrice: 50, priceFloor: 20, storeBuyOff: 0, storeSellOff: 35, minPrice: 20, maxPrice: 285, storeTargetStock: 12, auctionStep: 2, color: '#ff9a3c' },
   crystite: { id: 'crystite', label: 'Crystite', icon: 'resource_smithore', module: 'module_smithore', enabled: false, basePrice: 90, minPrice: 30, maxPrice: 300, storeTargetStock: 8, auctionStep: 3, color: '#d77bff' }
 });
 
@@ -154,28 +159,53 @@ const PRODUCTION_TABLE = deepFreeze({
 });
 
 /*
- * Events. `origin`: 'c64' = event type documented for the original; 'ruc' = R.U.C.'s own content (NOT C64).
- * `source`: 'manual' or 'secondary' (community / recreation description of the type). `provisional`: the number applied is a
- * R.U.C. placeholder inherited from the previous events (the card says so). The manual's 21 individual types and the meteorite
- * are listed as pending in the README instead of being faked here.
+ * Events: [Atari code] decoded from the 1983 disassembly (docs/research/events.md); the [C64] has the same 22 personal events in the
+ * same order with the same texts (docs/research/c64-strings.txt). Texts are faithful Catalan translations of the original messages.
+ * Personal: `quality` = the original weight (sign: good/bad; the money is |quality| x 25 x (floor(round / 4) + 1), see
+ * EventSystem.amount); `perMule`: the module whose installed MULEs multiply it; `needs`: precondition (see EventSystem.precondition).
+ * Planetary: `tickets` = the bag's initial count (max per game); `timing`: 'before' acts on the production before it is shown,
+ * 'after' strikes after the production display. `art` = frame of event_cards_strip (0 bloom, 1 solar storm, 2 rich vein,
+ * 3 breakdown, 4 ship, 5 dust, 6 scrap, 7 first-aid kit), reused as best fits.
  */
 const EVENT_DEFS = deepFreeze({
-  // Planetary events: [manual] "8 different types ... just before the Production phase".
-  pest_attack: { id: 'pest_attack', scope: 'planet', negative: true, name: 'Plaga', art: 0, origin: 'c64', source: 'secondary', provisional: true, text: (p) => `Una plaga ataca la parcel·la #${p.plot} de ${p.who}: aquest torn no hi produeix menjar.` },
-  acid_rain: { id: 'acid_rain', scope: 'planet', negative: false, name: 'Pluja àcida', art: 5, origin: 'c64', source: 'manual', provisional: true, foodPct: 35, energyPct: 30, text: (p) => `Pluja àcida: +${p.foodPct}% de menjar i -${p.energyPct}% d'energia aquest torn.` },
-  solar_activity: { id: 'solar_activity', scope: 'planet', negative: false, name: 'Activitat solar', art: 1, origin: 'c64', source: 'secondary', provisional: true, energyPct: 30, text: (p) => `Activitat solar: +${p.energyPct}% d'energia aquest torn.` },
-  planetquake: { id: 'planetquake', scope: 'planet', negative: true, name: 'Terratrèmol', art: 5, origin: 'c64', source: 'manual', provisional: true, smithorePct: 25, text: (p) => `Terratrèmol: -${p.smithorePct}% de smithore a les mines aquest torn.` },
-  radiation: { id: 'radiation', scope: 'planet', negative: true, name: 'Radiació', art: 3, origin: 'c64', source: 'secondary', provisional: false, text: (p) => `Radiació: el RUC de la parcel·la #${p.plot} de ${p.who} fuig i es perd.` },
-  store_fire: { id: 'store_fire', scope: 'planet', negative: true, name: 'Incendi a la botiga', art: 7, origin: 'c64', source: 'secondary', provisional: false, text: (p) => `Incendi a la botiga: es perd tot l'estoc (${p.lost}).` },
-  pirates: { id: 'pirates', scope: 'planet', negative: true, name: 'Pirates', art: 4, origin: 'c64', source: 'manual', provisional: false, text: (p) => `Pirates: roben tot el smithore dels colons (${p.amount} unitats).` },
-  // Individual events: the 25% draw and the leader / last rules are [manual]; this catalogue is R.U.C.'s own.
-  rich_vein: { id: 'rich_vein', scope: 'individual', negative: false, name: 'Veta rica', art: 2, origin: 'ruc', amount: 3, text: (p) => `${p.who} troba una veta rica: +${p.amount} smithore.` },
-  ruc_breakdown: { id: 'ruc_breakdown', scope: 'individual', negative: true, name: 'Avaria de RUC', art: 3, origin: 'ruc', text: (p) => `El RUC de la parcel·la #${p.plot} de ${p.who} s'avaria: produeix 0 aquest torn.` },
-  salvage: { id: 'salvage', scope: 'individual', negative: false, name: 'Ferralla', art: 6, origin: 'ruc', amount: 120, text: (p) => `${p.who} recupera ferralla: +${p.amount} cr.` },
-  medical_bill: { id: 'medical_bill', scope: 'individual', negative: true, name: 'Factura mèdica', art: 7, origin: 'ruc', amount: 80, text: (p) => `${p.who} paga una factura mèdica: -${p.amount} cr (mínim 0 d'efectiu).` }
+  // Planetary events, in the original id order (roundEventsProbInit).
+  pest_attack: { id: 'pest_attack', scope: 'planet', negative: true, tickets: 3, timing: 'after', name: 'Atac de plaga', art: 0, origin: 'c64', text: (p) => `La plaga ataca la parcel·la #${p.plot} de ${p.who}: s'hi perd tot el menjar (${p.amount}).` },
+  pirates: { id: 'pirates', scope: 'planet', negative: true, tickets: 2, timing: 'after', name: 'Nau pirata', art: 4, origin: 'c64', text: (p) => `Els pirates s'enduen tot el smithore! (${p.amount} unitats)` },
+  acid_rain: { id: 'acid_rain', scope: 'planet', negative: false, tickets: 3, timing: 'before', name: 'Tempesta de pluja àcida', art: 5, origin: 'c64', text: () => 'Més producció de menjar, menys energia.' },
+  planetquake: { id: 'planetquake', scope: 'planet', negative: true, tickets: 3, timing: 'before', name: 'Terratrèmol planetari', art: 3, origin: 'c64', text: (p) => `La producció minera és la meitat de la normal.${p.slide ? ` Una muntanya llisca de la parcel·la #${p.slide.from + 1} a la #${p.slide.to + 1}.` : ''}` },
+  sunspot: { id: 'sunspot', scope: 'planet', negative: false, tickets: 3, timing: 'before', name: 'Activitat de taques solars', art: 1, origin: 'c64', text: () => 'La producció d\'energia augmenta.' },
+  // [Atari code] the "new crystite deposit" subtext is printed only in Tournament; Standard shows just where it fell.
+  meteorite: { id: 'meteorite', scope: 'planet', negative: true, tickets: 2, timing: 'before', name: 'Impacte de meteorit', art: 2, origin: 'c64', text: (p) => `Cau a la parcel·la #${p.plot}${p.mule ? ' i destrueix el RUC que hi havia' : ''}.` },
+  radiation: { id: 'radiation', scope: 'planet', negative: true, tickets: 2, timing: 'before', name: 'Radiació', art: 3, origin: 'c64', text: (p) => `Un RUC es torna boig! (parcel·la #${p.plot} de ${p.who})` },
+  store_fire: { id: 'store_fire', scope: 'planet', negative: true, tickets: 2, timing: 'after', name: 'Incendi a la botiga', art: 7, origin: 'c64', text: () => 'Tot l\'estoc de la botiga es perd!' },
+  // Personal events, index = original id 00..21.
+  package: { id: 'package', scope: 'individual', quality: 1, name: 'Paquet de casa', art: 4, origin: 'c64', text: () => 'Acabes de rebre un paquet dels teus parents del planeta natal amb 3 de menjar i 2 unitats d\'energia.' },
+  traveler: { id: 'traveler', scope: 'individual', quality: 1, name: 'Viatger espacial', art: 2, origin: 'c64', text: () => 'Un viatger espacial errant t\'ha agraït l\'hospitalitat deixant-te dues barres de smithore.' },
+  glac_elves: { id: 'glac_elves', scope: 'individual', quality: -1, name: 'Glac-elfs', art: 0, origin: 'c64', text: () => 'Uns glac-elfs entremaliats han entrat al teu cobert i t\'han robat la meitat del menjar.' },
+  best_built: { id: 'best_built', scope: 'individual', quality: 2, needs: 'mule', name: 'El millor construït', art: 6, origin: 'c64', text: (p) => `El teu RUC ha estat declarat el «millor construït» a la fira de la colònia. Has guanyat ${p.amount} cr.` },
+  lost_bolt: { id: 'lost_bolt', scope: 'individual', quality: -3, needs: 'mule', name: 'Un cargol perdut', art: 3, origin: 'c64', text: (p) => `A un dels teus RUCs li ha caigut un cargol. La reparació t'ha costat ${p.amount} cr.` },
+  tap_dance: { id: 'tap_dance', scope: 'individual', quality: 4, needs: 'mule', name: 'Concurs de claqué', art: 6, origin: 'c64', text: (p) => `El teu RUC ha guanyat el concurs de claqué de la colònia. Has cobrat ${p.amount} cr.` },
+  mining_repair: { id: 'mining_repair', scope: 'individual', quality: -2, perMule: ['smithore', 'crystite'], name: 'RUCs miners gastats', art: 3, origin: 'c64', text: (p) => `Els teus RUCs miners s'han deteriorat per l'ús intensiu i reparar-los costa ${p.each} cr cadascun. El cost total és de ${p.total} cr.` },
+  solar_dirty: { id: 'solar_dirty', scope: 'individual', quality: -1, perMule: ['energy'], name: 'Col·lectors bruts', art: 1, origin: 'c64', text: (p) => `Els col·lectors solars dels teus RUCs d'energia estan bruts. Netejar-los t'ha costat ${p.each} cr cadascun, en total ${p.total} cr.` },
+  agri_grant: { id: 'agri_grant', scope: 'individual', quality: 2, perMule: ['food'], name: 'Ajut agrícola', art: 0, origin: 'c64', text: (p) => `El Consell Agrícola de la colònia t'ha concedit ${p.each} cr per cada parcel·la de menjar que has desenvolupat. L'ajut total és de ${p.total} cr.` },
+  wart_worm: { id: 'wart_worm', scope: 'individual', quality: 4, name: 'Cucs berruga', art: 0, origin: 'c64', text: (p) => `La colònia t'ha premiat amb ${p.amount} cr per aturar la plaga de cucs berruga.` },
+  museum: { id: 'museum', scope: 'individual', quality: 8, name: 'Ordinador antic', art: 6, origin: 'c64', text: (p) => `El museu t'ha comprat l'ordinador personal antic per ${p.amount} cr.` },
+  swamp_eel: { id: 'swamp_eel', scope: 'individual', quality: 2, name: 'Anguila de pantà', art: 5, origin: 'c64', text: (p) => `Has guanyat el concurs de menjar anguila de pantà de la colònia i has cobrat ${p.amount} cr. (Quin fàstic!)` },
+  charity: { id: 'charity', scope: 'individual', quality: 3, name: 'Caritat', art: 4, origin: 'c64', text: (p) => `Una entitat benèfica del teu planeta natal s'ha compadit de tu i t'ha enviat ${p.amount} cr.` },
+  investments: { id: 'investments', scope: 'individual', quality: 6, name: 'Dividends', art: 2, origin: 'c64', text: (p) => `Les teves inversions d'altres mons en Estupidesa Artificial t'han pagat ${p.amount} cr de dividends.` },
+  inheritance: { id: 'inheritance', scope: 'individual', quality: 4, name: 'Herència', art: 2, origin: 'c64', text: (p) => `Un parent llunyà ha mort i t'ha deixat una gran fortuna. Però, després d'impostos, només n'has rebut ${p.amount} cr.` },
+  moose_rat: { id: 'moose_rat', scope: 'individual', quality: 2, name: 'Rata-ant', art: 5, origin: 'c64', text: (p) => `Has trobat una rata-ant morta i n'has venut la pell per ${p.amount} cr.` },
+  gypsy_inlaws: { id: 'gypsy_inlaws', scope: 'individual', quality: -6, needs: 'cash', name: 'Sogres espacials', art: 6, origin: 'c64', text: (p) => `Els teus sogres, gitanos espacials, han deixat el poble fet un desastre. Netejar-lo t'ha costat ${p.amount} cr.` },
+  cat_bugs: { id: 'cat_bugs', scope: 'individual', quality: -4, needs: 'cash', name: 'Cuques-gat', art: 3, origin: 'c64', text: (p) => `Unes cuques-gat voladores s'han menjat el sostre de casa teva. La reparació costa ${p.amount} cr.` },
+  kazinga: { id: 'kazinga', scope: 'individual', quality: -4, needs: 'cash', name: 'Curses de kazinga', art: 5, origin: 'c64', text: (p) => `Has perdut ${p.amount} cr apostant a les curses de kazinga de dues potes.` },
+  bat_lizard: { id: 'bat_lizard', scope: 'individual', quality: -4, needs: 'cash', name: 'Llangardaix-ratpenat', art: 7, origin: 'c64', text: (p) => `Un llangardaix-ratpenat ha mossegat el teu fill i la factura de l'hospital t'ha costat ${p.amount} cr.` },
+  lost_plot: { id: 'lost_plot', scope: 'individual', quality: -1, needs: 'mule', name: 'Parcel·la perduda', art: 5, origin: 'c64', text: (p) => `Has perdut una parcel·la perquè la reclamació no s'havia registrat. (parcel·la #${p.plot})` },
+  extra_plot: { id: 'extra_plot', scope: 'individual', quality: 1, needs: 'free_plot', name: 'Parcel·la extra', art: 0, origin: 'c64', text: (p) => `Has rebut una parcel·la extra per fomentar el desenvolupament de la colònia. (parcel·la #${p.plot})` }
 });
-const PLANET_EVENT_IDS = Object.freeze(['pest_attack', 'acid_rain', 'solar_activity', 'planetquake', 'radiation', 'store_fire', 'pirates']);
-const INDIVIDUAL_EVENT_IDS = Object.freeze(['rich_vein', 'ruc_breakdown', 'salvage', 'medical_bill']);
+const PLANET_EVENT_IDS = Object.freeze(['pest_attack', 'pirates', 'acid_rain', 'planetquake', 'sunspot', 'meteorite', 'radiation', 'store_fire']);
+const INDIVIDUAL_EVENT_IDS = Object.freeze(['package', 'traveler', 'glac_elves', 'best_built', 'lost_bolt', 'tap_dance', 'mining_repair', 'solar_dirty',
+  'agri_grant', 'wart_worm', 'museum', 'swamp_eel', 'charity', 'investments', 'inheritance', 'moose_rat', 'gypsy_inlaws', 'cat_bugs', 'kazinga',
+  'bat_lizard', 'lost_plot', 'extra_plot']);
 
 const AI_PROFILES = deepFreeze({
   conservative: { label: 'conservador', reserveTurns: 2, margin: 10, extremeGuard: true, prefers: 'food' },
@@ -463,11 +493,17 @@ const GameState = {
       turn: 0, phase: 'TURN_START', phaseData: {}, players, plots, store: StoreState.create(),
       bank: { cash: 0 }, ext: { cash: 0, items: {} }, modifiers: null, event: null,
       landOrder: players.map((p) => p.id), lastAvg: {}, history: [], auctionLog: [],
+      // [Atari code] the store's price P per good (buy/sell lines derive from it; see StoreSystem.price).
+      storePrice: {},
       // RUC book-keeping: store.ruc + installed + carried = RUC_START + made - lost (checked by RucAudit).
       rucs: { made: 0, lost: 0 }, settlement: null,
+      // [Atari code] used: turnEventsHappened (one flag per personal event, own array: the original's 21-byte overflow is not copied);
+      // bag: roundEventsProb tickets left; rank: ordersPlayer (last Status Summary, ties at random); after: drawn event waiting for
+      // the production display.
+      events: { used: INDIVIDUAL_EVENT_IDS.map(() => 0), bag: Object.fromEntries(PLANET_EVENT_IDS.map((id) => [id, EVENT_DEFS[id].tickets])), rank: null, after: null },
       flags: { landAuctions: false }, savedAt: 0, createdAt: 0
     };
-    Object.keys(RESOURCE_DEFS).forEach((k) => { state.ext.items[k] = 0; });
+    Object.keys(RESOURCE_DEFS).forEach((k) => { state.ext.items[k] = 0; state.storePrice[k] = RESOURCE_DEFS[k].basePrice; });
     state.initialTotals = { cash: players.reduce((s, p) => s + p.cash, 0), items: {} };
     Object.keys(RESOURCE_DEFS).forEach((k) => {
       state.initialTotals.items[k] = players.reduce((s, p) => s + p.inventory[k], 0) + state.store.stock[k];
@@ -475,8 +511,8 @@ const GameState = {
     state.modifiers = GameState.freshModifiers();
     return { state, rng };
   },
-  /** Per-turn modifiers, all in integer percent so the economy never touches floats. zeroPlots: plots that produce 0 this turn. */
-  freshModifiers() { return { foodPct: 100, energyPct: 100, smithorePct: 100, zeroPlots: [] }; },
+  /** Per-round production modifiers of the "before production" planetary events (see ProductionSystem.applyEvents). */
+  freshModifiers() { return { sunspot: false, quake: false, acidRow: null }; },
   clone(state) { return JSON.parse(JSON.stringify(state)); }
 };
 
@@ -484,6 +520,18 @@ const GameState = {
  * 4. Systems
  * ===================================================================== */
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+/**
+ * [Atari code] calcBinomiale: a symmetric bell-shaped draw on [-6, 6), scaled by an amplitude factor F and rounded (production
+ * variation, the smithore price step). [PROVISIONAL] mechanism: we draw it as the sum of 12 uniforms - 6 (Irwin-Hall) and round half
+ * away from zero; this reproduces the report's published shares (Standard F = 0.5: -1/0/+1 = 16.06/67.66/16.06 %, +-2 ~0.1 % each;
+ * F = 1: 0 = 37.7 %). The exact byte-level routine was not transcribed.
+ */
+const binomialStep = (rng, F) => {
+  let x = -6;
+  for (let i = 0; i < 12; i++) x += rng.next();
+  const v = F * x;
+  return Math.sign(v) * Math.round(Math.abs(v));
+};
 const playerById = (state, id) => state.players.find((p) => p.id === id);
 const plotById = (state, id) => state.plots.find((p) => p.id === id);
 
@@ -529,19 +577,58 @@ class TurnSystem {
 }
 
 const StoreSystem = {
-  /** [PROVISIONAL] formula. [manual]: the price depends on the M.U.L.E.s available and on undeveloped plots (the latter is not modelled). */
-  rucPrice(state) { return Math.min(CONFIG.RUC_PRICE_MAX, CONFIG.RUC_BASE + Math.max(0, CONFIG.RUC_START - state.store.ruc) * CONFIG.RUC_PRICE_STEP); },
+  /** [Atari code] calcMulePrice: (P_smithore - P_smithore mod 5) x 2, i.e. twice the smithore price rounded down to $10 (P 50 -> $100). */
+  rucPrice(state) { const ps = this.price(state, RESOURCE_DEFS.smithore); return (ps - ps % 5) * 2; },
+  /** The store's price P of a good (state.storePrice); a market the state does not track (tests, Phase B) uses its basePrice. */
+  price(state, def) { const v = state.storePrice && state.storePrice[def.id]; return v === undefined ? def.basePrice : v; },
+  /** [Atari code][C64] store buy line: food / energy P - 15, smithore P (round 1: 15 / 10 / 50). */
+  bid(state, def) { return clamp(this.price(state, def) - (def.storeBuyOff || 0), def.minPrice, def.maxPrice); },
+  /** [Atari code][C64] store sell line: food / energy P + 20, smithore P + 35 (round 1: 50 / 45 / 85). */
+  ask(state, def) { return clamp(this.price(state, def) + (def.storeSellOff || 0), def.minPrice, def.maxPrice); },
   /**
-   * [PROVISIONAL] formula (the manual only says "supply and demand, and the latest prices paid"): scarce stock pushes the price up,
-   * plenty pushes it down: basePrice * clamp(target / max(stock,1), 0.55, 2.2). The result always stays inside the store bounds
-   * of the manual: minimum 15/10/14 and ceiling 265.
+   * [Atari code] calcGoodPriceSupplyDemand: P x (0.25 + 0.75 x demand / supply). The ratio is 3-bit fixed point (quantised down to
+   * 1/8), a supply of 0 counts as 1, and only smithore clamps the ratio to [0.25, 3]. Integer form: floor(P x (16 + 6q) / 64), q = 8 x ratio.
+   * Rounding the product down is our reading of the integer code ([PROVISIONAL] off-by-one at most).
    */
-  centralPrice(def, stock) {
-    const ratio = clamp(def.storeTargetStock / Math.max(stock, 1), CONFIG.AUCTION.storeRatioMin, CONFIG.AUCTION.storeRatioMax);
-    return clamp(Math.round(def.basePrice * ratio), def.minPrice, def.maxPrice);
+  supplyDemand(P, demand, supply, clampRatio = false) {
+    let q = Math.floor(8 * demand / Math.max(1, supply));
+    if (clampRatio) q = clamp(q, 2, 24);
+    return Math.floor(P * (16 + 6 * q) / 64);
   },
-  ask(def, stock) { return clamp(Math.round(this.centralPrice(def, stock) * (100 + CONFIG.AUCTION.storeSpreadPct) / 100), def.minPrice, def.maxPrice); },
-  bid(def, stock) { return clamp(Math.round(this.centralPrice(def, stock) * (100 - CONFIG.AUCTION.storeSpreadPct) / 100), def.minPrice, def.maxPrice); },
+  /** [Atari code] limitGoodPrice: floor per good (food 30, energy 25, smithore 20), ceiling 250. */
+  limit(def, P) { return clamp(P, def.priceFloor || def.minPrice, CONFIG.STORE_PRICE.max); },
+  /** [Atari code] after each goods auction P becomes the average price of the units actually traded (only if at least one was). */
+  afterAuction(state, res, result) { if (result.volume > 0 && result.avg !== null) state.storePrice[res] = result.avg; },
+  /** [Atari code] calcMuleReq: min(free plots, 4) + owned plots without a M.U.L.E., clamped to 0..8 (the smithore demand). */
+  muleDemand(state) {
+    const free = state.plots.filter((q) => Plot.claimable(q)).length;
+    const idle = state.plots.filter((q) => q.ownerId && !q.ruc).length;
+    return clamp(Math.min(free, 4) + idle, 0, 8);
+  },
+  /**
+   * Supply/demand update of P for the next round's auctions ([Atari code] formulas). [PROVISIONAL] timing: run once at the end of each
+   * round (after the auctions, before the M.U.L.E. build), so round 1 opens at the start prices exactly as observed on the [C64].
+   *   Food:     supply = store + sum(max(0, own - req) / 2 + production), demand = next round's requirement x 4
+   *   Energy:   supply = store + sum(max(0, own - need) x 3/4 + production), demand = sum(needs) + 4; need = non-energy M.U.L.E.s
+   *   Smithore: supply = corral + store smithore / 2, demand = muleDemand; max(50, P') + 7 x binomial step (-28..+28), then >= 20
+   * `production` = what each colonist harvested this round (the settlement report).
+   */
+  updatePrices(state, rng) {
+    const P = state.storePrice; const stock = state.store.stock; const defs = RESOURCE_DEFS;
+    const rows = state.settlement && state.settlement.turn === state.turn ? state.settlement.rows : [];
+    const produced = (pid, res) => { const row = rows.find((r) => r.playerId === pid); return row ? row.produced[res] || 0 : 0; };
+    const nonEnergy = (pid) => state.plots.filter((q) => q.ownerId === pid && q.ruc && q.ruc.module !== 'energy').length;
+    const req = state.turn >= CONFIG.TURNS ? 0 : ConsumptionSystem.foodNeed(state.turn + 1);
+    const foodSupply = state.players.reduce((s, p) => s + Math.floor(Math.max(0, p.inventory.food - req) / 2) + produced(p.id, 'food'), stock.food || 0);
+    P.food = this.limit(defs.food, this.supplyDemand(this.price(state, defs.food), req * 4, foodSupply));
+    const energySupply = state.players.reduce((s, p) => s + Math.floor(Math.max(0, p.inventory.energy - nonEnergy(p.id)) * 3 / 4) + produced(p.id, 'energy'), stock.energy || 0);
+    const energyDemand = state.players.reduce((s, p) => s + nonEnergy(p.id), 0) + 4;
+    P.energy = this.limit(defs.energy, this.supplyDemand(this.price(state, defs.energy), energyDemand, energySupply));
+    const sp = CONFIG.STORE_PRICE;
+    const smithore = Math.max(sp.smithoreInterimMin, this.supplyDemand(this.price(state, defs.smithore), this.muleDemand(state), state.store.ruc + Math.floor((stock.smithore || 0) / 2), true));
+    P.smithore = this.limit(defs.smithore, smithore + sp.smithoreStep * clamp(binomialStep(rng, 1), -sp.smithoreStepMax, sp.smithoreStepMax));
+    return { food: P.food, energy: P.energy, smithore: P.smithore };
+  },
   buyRuc(state, playerId) {
     const price = this.rucPrice(state);
     if (state.store.ruc < 1) return { ok: false, reason: 'no_stock' };
@@ -576,8 +663,9 @@ const StoreSystem = {
   /** [manual] A M.U.L.E. that runs away is gone: it does not come back to the corral and nothing is refunded. */
   loseRuc(state) { state.rucs.lost += 1; },
   /**
-   * Between turns: the smithore the store bought becomes RUCs ([manual] 2 each, one whole turn to build, so they are available in the
-   * next development). No free food / energy delivery: the store only has what colonists sold it (or what events changed).
+   * Between turns: the smithore the store bought becomes RUCs. [Atari code] buildAndCalcPriceMule: min(14 - corral, smithore / 2),
+   * 2 Smithore each, available in the next development. No free food / energy delivery: the store only has what colonists sold it
+   * (or what events changed).
    */
   betweenTurns(state) {
     let made = 0;
@@ -756,20 +844,26 @@ const ProductionSystem = {
     return this.baseYield(plot, plot.ruc.module) + this.adjacencyBonus(state, plot) + this.learningBonus(state, plot);
   },
   /**
-   * [PROVISIONAL] random variation. The manual only says the base is an average and that output "varies from 0 to 8 units"; the real
-   * distribution is unknown. Here: a + b with a, b uniform in {-1, 0, +1} from the seeded PRNG (-2..+2, centred on 0). NOT C64-verified.
+   * [Atari code] random variation: units = mean + round(F x binomial), Standard F = 0.5 -> -1/0/+1 at ~16/68/16 %, +-2 at ~0.1 % each
+   * (see binomialStep). One seeded draw per plot; the result is then clamped to 0..8.
    */
-  variation(rng) { return (rng.int(3) - 1) + (rng.int(3) - 1); },
+  variation(rng) { return binomialStep(rng, CONFIG.PRODUCTION.varAmp); },
   clampUnits(u) { return clamp(u, CONFIG.PRODUCTION.min, CONFIG.PRODUCTION.max); },
   /**
-   * [PROVISIONAL] order of modifiers: units -> clamp 0..8 -> event percentage (integer, floored once) -> plots zeroed by an event
-   * (pest, breakdown). An event can push a plot above 8; nothing is ever negative.
+   * [Atari code] "before production" planetary events change each plot's final production (after variation and the 0..8 clamp):
+   * planetquake halves mining (floor); sunspot +3 energy, max 8; acid rain: cloud row food +4 / energy -2, other rows food +1 /
+   * energy -1, clamped 0..8. [Atari code] reading: they act on every plot with that MULE type, so an unpowered food plot (0) still
+   * gets the acid-rain +1 ([PROVISIONAL]: not seen in the emulator).
    */
   applyEvents(state, plot, units) {
-    const m = state.modifiers; const res = plot.ruc.module;
-    if (m.zeroPlots.some((z) => z.plotId === plot.id)) return 0;
-    const pct = res === 'food' ? m.foodPct : res === 'energy' ? m.energyPct : res === 'smithore' ? m.smithorePct : 100;
-    return Math.max(0, Math.floor(units * pct / 100));
+    const m = state.modifiers; const res = plot.ruc.module; let u = units;
+    if (m.quake && (res === 'smithore' || res === 'crystite')) u = Math.floor(u / 2);
+    if (m.sunspot && res === 'energy') u = Math.min(CONFIG.PRODUCTION.max, u + 3);
+    if (m.acidRow !== null && m.acidRow !== undefined && (res === 'food' || res === 'energy')) {
+      const cloud = plot.y === m.acidRow;
+      u = this.clampUnits(u + (res === 'food' ? (cloud ? 4 : 1) : (cloud ? -2 : -1)));
+    }
+    return u;
   },
   /** What a colonist can expect (tooltip, AI): the mean with this turn's known events, without the random draw. */
   expectedYield(state, plot) {
@@ -783,31 +877,34 @@ const ProductionSystem = {
   },
   /**
    * [manual] Food and Smithore RUCs each need one unit of energy left over from the previous turn; energy RUCs power themselves, and
-   * energy made this turn never powers anything until the next one. [PROVISIONAL] when energy is short, RUCs are powered in the
-   * colonist's fixed priority (food before smithore), then by plot id: the C64 selection is unknown.
+   * energy made this turn never powers anything until the next one. [Atari code] for each missing unit one RANDOM exploitation of
+   * that colonist produces nothing (seeded PRNG). [PROVISIONAL] detail: drawn among its non-energy RUCs, without repetition (as [FN]
+   * does; the write-up only says "a random exploitation owned by the player").
    */
-  activation(state, p) {
+  activation(state, p, rng) {
     const mine = state.plots.filter((q) => q.ownerId === p.id && q.ruc).sort((a, b) => a.id - b.id);
-    const rank = (m) => { const i = p.priority.indexOf(m); return i < 0 ? 99 : i; };
-    const needy = mine.filter((q) => q.ruc.module !== 'energy').sort((a, b) => (rank(a.ruc.module) - rank(b.ruc.module)) || (a.id - b.id));
+    const needy = mine.filter((q) => q.ruc.module !== 'energy');
     const powered = Math.min(needy.length, p.inventory.energy || 0);
-    const on = new Set(needy.slice(0, powered).map((q) => q.id));
+    const on = new Set(needy.map((q) => q.id));
+    for (let k = needy.length - powered, pool = needy.slice(); k > 0; k--) on.delete(pool.splice(rng.int(pool.length), 1)[0].id);
     mine.forEach((q) => { if (q.ruc.module === 'energy') on.add(q.id); });
     return { mine, on, powered, stopped: needy.length - powered };
   }
 };
 
 const ConsumptionSystem = {
-  /** [PROVISIONAL] placeholder bands (2/3/4 food per turn): the C64 food table per turn is not documented. */
+  /** [Atari code][C64] food required for the current round: 3 (rounds 1-4), 4 (5-8), 5 (9-12). */
   foodNeed(turn) { const r = CONFIG.FOOD_NEED.find((x) => turn >= x.from && turn <= x.to); return r ? r.n : CONFIG.FOOD_NEED[2].n; },
+  /** [Atari code][C64] development time units = 10 + floor(91 x min(1, food / need)): 101 with enough food, 10 with none. */
+  devUnits(food, need) { return CONFIG.DEV.baseUnits + Math.floor(CONFIG.DEV.foodUnits * Math.min(1, need > 0 ? food / need : 1)); },
   /**
-   * [manual] food decides the development time. [PROVISIONAL] numbers: each missing food unit costs 25% of the base time next turn,
-   * never below 15 s. There is no money penalty for hunger (the old survival debt does not exist in the original).
+   * Development time of a colonist, counted with the food it holds when its turn starts (it is eaten later, at production). One unit is
+   * 28 PAL frames ([C64] 50.125 Hz): 101 units ~ 56.4 s, 10 units ~ 5.6 s. Same for every difficulty. `speciesFactor`: hook for the
+   * species handicap ([Atari code] Flapper 9/7, Humanoid 5/7 of a unit), 1 until species exist. No money penalty for hunger.
    */
-  humanTimeMs(state, player) {
-    const base = CONFIG.DIFFICULTY[state.difficulty].humanTimeMs;
-    const cut = base * (100 - CONFIG.SHORTAGE.timePenaltyPct * player.shortageFlags.foodMissing) / 100;
-    return Math.max(CONFIG.SHORTAGE.minTimeMs, Math.floor(cut));
+  humanTimeMs(state, player, speciesFactor = 1) {
+    const units = this.devUnits(player.inventory.food || 0, this.foodNeed(state.turn));
+    return Math.round(units * CONFIG.DEV.unitFrames * speciesFactor * 1000 / CONFIG.DEV.palHz);
   }
 };
 
@@ -817,7 +914,8 @@ const ConsumptionSystem = {
  *   used     energy spent by non-energy RUCs (from that reserve) and food eaten
  *   spoiled  [card] 50% of the food left, 25% of the energy left, ore above 50: on the reserve, BEFORE the new harvest
  *   produced the new harvest (it is never spoiled this turn)
- *   final  = start - used - spoiled + produced
+ *   lost     taken from the reserve by an "after production" planetary event (pirates); pest/pirates lower `produced` instead
+ *   final  = start - used - spoiled + produced - lost
  * The report lives in state.settlement, so a reload or a skipped screen never runs it twice.
  */
 const SettlementSystem = {
@@ -833,9 +931,10 @@ const SettlementSystem = {
     const harvest = [];
     const rows = state.players.map((p) => {
       const blank = () => { const o = {}; resIds.forEach((r) => { o[r] = 0; }); return o; };
-      const start = blank(); const used = blank(); const spoiled = blank(); const produced = blank();
+      // lost: goods taken by an "after production" event from the reserve (pirates), so start - used - spoiled + produced - lost = final.
+      const start = blank(); const used = blank(); const spoiled = blank(); const produced = blank(); const lost = blank();
       resIds.forEach((r) => { start[r] = p.inventory[r] || 0; });
-      const act = ProductionSystem.activation(state, p);
+      const act = ProductionSystem.activation(state, p, rng);
       if (act.powered > 0) ResourceLedger.moveItem(state, 'energy', p.id, 'nature', act.powered);
       used.energy = act.powered;
       const eaten = Math.min(need, p.inventory.food);
@@ -850,13 +949,13 @@ const SettlementSystem = {
       });
       const items = act.mine.map((plot) => {
         const on = act.on.has(plot.id);
-        const amount = on ? ProductionSystem.rollYield(state, plot, rng) : 0;
+        const amount = on ? ProductionSystem.rollYield(state, plot, rng) : ProductionSystem.canProduce(plot, plot.ruc.module) ? ProductionSystem.applyEvents(state, plot, 0) : 0;
         if (amount > 0 && resIds.includes(plot.ruc.module)) { harvest.push({ owner: p.id, res: plot.ruc.module, amount }); produced[plot.ruc.module] += amount; }
-        const zero = state.modifiers.zeroPlots.find((z) => z.plotId === plot.id);
-        return { plotId: plot.id, module: plot.ruc.module, active: on, amount, zeroed: zero ? zero.reason : null };
+        // zeroed: set later by an "after production" event (pest, pirates) that takes this plot's harvest.
+        return { plotId: plot.id, module: plot.ruc.module, active: on, amount, zeroed: null };
       });
       p.productionReport = { turn: state.turn, energyUsed: act.powered, items };
-      return { playerId: p.id, need, start, used, spoiled, produced, missingFood: need - eaten, stopped: act.stopped, items };
+      return { playerId: p.id, need, start, used, spoiled, produced, lost, missingFood: need - eaten, stopped: act.stopped, items };
     });
     harvest.forEach((h) => ResourceLedger.moveItem(state, h.res, 'nature', h.owner, h.amount));
     rows.forEach((row) => { const p = playerById(state, row.playerId); row.final = {}; resIds.forEach((r) => { row.final[r] = p.inventory[r] || 0; }); });
@@ -866,90 +965,191 @@ const SettlementSystem = {
 };
 
 const EventSystem = {
-  /** [PROVISIONAL] R.U.C. rule kept from the spec: no negative event on turns 1 and 12 (not C64-verified). */
-  safeTurn(state) { return state.turn === 1 || state.turn === CONFIG.TURNS; },
   /**
-   * [manual] "The losing player will never receive a bad luck event, and the winning player never gets lucky." Everyone tied for the
-   * top is a leader, everyone tied for the bottom is last. While all net worths are equal there is no ranking yet: nobody is excluded.
+   * [Atari code] ordersPlayer: the ranking of the last Status Summary (total score), ties broken at random. Drawn once at the start of
+   * each round (seeded) and kept in the save, so every event of the round sees the same order.
    */
-  standing(state) {
-    const w = state.players.map((p) => ScoringSystem.netWorth(state, p));
-    const max = Math.max(...w); const min = Math.min(...w);
-    if (max === min) return { leaders: [], last: [] };
-    return { leaders: state.players.filter((p, i) => w[i] === max).map((p) => p.id), last: state.players.filter((p, i) => w[i] === min).map((p) => p.id) };
+  rankPlayers(state, rng) {
+    const rows = state.players.map((p) => ({ id: p.id, w: p.score, tie: rng.next() }));
+    state.events.rank = rows.sort((a, b) => (b.w - a.w) || (a.tie - b.tie)).map((x) => x.id);
+    return state.events.rank;
   },
-  /** Structural preconditions only (an event needs something to act on). */
-  applicable(state, id, pid = null) {
-    if (id === 'ruc_breakdown') return state.plots.some((q) => q.ownerId === pid && q.ruc);
-    if (id === 'pest_attack') return state.plots.some((q) => q.ruc && q.ruc.module === 'food');
-    if (id === 'radiation') return state.plots.some((q) => q.ruc);
+  /** The current ranking (1st first); without a drawn one (tests, debug) a stable order by score. */
+  rank(state) {
+    if (state.events.rank) return state.events.rank;
+    return state.players.map((p, i) => ({ id: p.id, w: p.score, i })).sort((a, b) => (b.w - a.w) || (a.i - b.i)).map((x) => x.id);
+  },
+  mules(state, pid, modules = null) { return state.plots.filter((q) => q.ownerId === pid && q.ruc && (!modules || modules.includes(q.ruc.module))).length; },
+  /** [Atari code] calcCashQualityPlayerEvent: |quality| x 25 x (floor(round / 4) + 1), times the MULE count for the per-MULE events. */
+  amount(state, id, pid) {
+    const def = EVENT_DEFS[id];
+    const each = Math.abs(def.quality) * CONFIG.EVENTS.moneyUnit * (Math.floor(state.turn / 4) + 1);
+    const count = def.perMule ? this.mules(state, pid, def.perMule) : 1;
+    return { each, count, total: each * count };
+  },
+  /** Personal events that move money (the others give or take goods or land). */
+  isMoney(id) { return !['package', 'traveler', 'glac_elves', 'lost_plot', 'extra_plot'].includes(id); },
+  /** [Atari code] event preconditions: the search moves on to the next candidate when one fails. */
+  precondition(state, id, pid) {
+    const def = EVENT_DEFS[id];
+    if (def.needs === 'mule') return this.mules(state, pid) > 0;
+    if (def.perMule) return this.mules(state, pid, def.perMule) > 0;
+    if (def.needs === 'cash') return playerById(state, pid).cash >= this.amount(state, id, pid).total;
+    if (def.needs === 'free_plot') return LandGrantSystem.freePlots(state).length > 0;
     return true;
   },
-  canHit(state, id, pid) {
-    const def = EVENT_DEFS[id];
-    if (!this.applicable(state, id, pid) || (def.negative && this.safeTurn(state))) return false;
-    const st = this.standing(state);
-    return def.negative ? !st.last.includes(pid) : !st.leaders.includes(pid);
+  /** [Atari code] a money penalty the player cannot pay cancels the event silently (no message, no charge, not marked used). */
+  affordable(state, id, pid) { return !(this.isMoney(id) && EVENT_DEFS[id].quality < 0) || playerById(state, pid).cash >= this.amount(state, id, pid).total; },
+  /** [Atari code] candidate check: not used yet, no bad one for the last two, no good one for the first, precondition holds. */
+  eligible(state, idx, pid, rank = this.rank(state)) {
+    const id = INDIVIDUAL_EVENT_IDS[idx]; const q = EVENT_DEFS[id].quality;
+    if (state.events.used[idx]) return false;
+    if (q < 0 && rank.slice(-2).includes(pid)) return false;
+    if (q > 0 && rank[0] === pid) return false;
+    return this.precondition(state, id, pid);
+  },
+  /** [Atari code] from `start` downwards with wrap-around (21 -> 0 -> 21), at most 20 candidates. Returns the index or null. */
+  search(state, start, pid) {
+    const n = INDIVIDUAL_EVENT_IDS.length; const rank = this.rank(state);
+    for (let k = 0, x = start; k < CONFIG.EVENTS.personalTries; k++, x = (x + n - 1) % n) if (this.eligible(state, x, pid, rank)) return x;
+    return null;
   },
   /**
-   * [manual] 25% chance at the start of EACH colonist's development turn: one independent draw per colonist. A debug-forced event skips
-   * the draw and the leader / last rule, but still needs something to act on.
+   * [Atari code] playerEvent, at the start of each player's development turn (humans and computers): random[0..79] < 22 (27.5 %) picks
+   * the candidate, then search(); a non-leader with 0 food gets #00 (the package) instead, even if it already happened. A debug-forced
+   * event skips the roll, the ranking rules and the used flag, but still needs its precondition and the cash.
    */
   rollIndividual(state, rng, pid, forced = null) {
-    const hit = rng.chance(CONFIG.EVENTS.individualPct);
-    const forcedId = forced && EVENT_DEFS[forced] && EVENT_DEFS[forced].scope === 'individual' && this.applicable(state, forced, pid) ? forced : null;
-    if (!hit && !forcedId) return null;
-    const pool = INDIVIDUAL_EVENT_IDS.filter((id) => this.canHit(state, id, pid));
-    const id = forcedId || (pool.length ? rng.pick(pool) : null);
-    return id ? this.build(state, rng, id, pid) : null;
+    let idx = null;
+    if (forced) {
+      const f = INDIVIDUAL_EVENT_IDS.indexOf(forced);
+      if (f < 0 || !this.precondition(state, forced, pid)) return null;
+      idx = f;
+    } else {
+      const a = rng.int(CONFIG.EVENTS.personalDie);
+      if (a >= INDIVIDUAL_EVENT_IDS.length) return null;
+      idx = this.search(state, a, pid);
+      if (idx === null) return null;
+      if (idx !== 0 && this.rank(state)[0] !== pid && (playerById(state, pid).inventory.food || 0) === 0) idx = 0;
+    }
+    const id = INDIVIDUAL_EVENT_IDS[idx];
+    if (!this.affordable(state, id, pid)) return null;
+    state.events.used[idx] = 1;
+    return this.build(state, rng, id, pid);
   },
-  /** [manual] planetary events come "just before the Production phase". Probability [PROVISIONAL]; at most one per turn. */
-  rollPlanet(state, rng, forced = null) {
-    const hit = rng.chance(CONFIG.EVENTS.planetPct);
-    const forcedId = forced && EVENT_DEFS[forced] && EVENT_DEFS[forced].scope === 'planet' && this.applicable(state, forced) ? forced : null;
-    if (!hit && !forcedId) return null;
-    const pool = PLANET_EVENT_IDS.filter((id) => this.applicable(state, id) && !(EVENT_DEFS[id].negative && this.safeTurn(state)));
-    const id = forcedId || (pool.length ? rng.pick(pool) : null);
-    return id ? this.build(state, rng, id, null) : null;
+  /** [Atari code] roundEvent draw: one ticket from the bag, uniformly among the tickets left; the ticket is always consumed. */
+  drawPlanet(state, rng) {
+    const bag = state.events.bag;
+    let r = rng.int(PLANET_EVENT_IDS.reduce((s, id) => s + bag[id], 0));
+    for (const id of PLANET_EVENT_IDS) { if (r < bag[id]) { bag[id] -= 1; return id; } r -= bag[id]; }
+    return null;
   },
-  /** Applies the effect immediately (through the ledger) and returns the card record, whose text carries the numbers applied. */
+  /** [Atari code] round 12 has no colony event: "THE SHIP IS BACK!" instead. */
+  shipBack() { return { id: 'ship_back', scope: 'planet', negative: false, name: 'La nau ha tornat!', art: 4, origin: 'c64', provisional: false, targetId: null, text: 'La nau de la Federació aterra: s\'ha acabat el temps.', params: {} }; },
+  /** [Atari code] random start plot, then down (wrapping) to the first plot that matches. */
+  scanPlots(state, rng, pred) {
+    const n = state.plots.length; const start = rng.int(n);
+    for (let k = 0; k < n; k++) { const q = state.plots[(start - k + n) % n]; if (pred(q)) return q; }
+    return null;
+  },
+  /** The settlement row and item of a plot if this round's production is already done (for the "after production" events). */
+  harvestOf(state, plotId) {
+    const st = state.settlement; if (!st || st.turn !== state.turn) return null;
+    for (const row of st.rows) { const item = row.items.find((x) => x.plotId === plotId); if (item) return { row, item }; }
+    return null;
+  },
+  destroyRuc(state, plot) { if (!plot.ruc) return false; plot.ruc = null; StoreSystem.loseRuc(state); return true; },
+  /**
+   * [Atari code] planetquake slide: a random mountain loses one level (level 1 becomes plain) and the plot left or right of it gains one
+   * (a plain becomes a 1-peak mountain); any MULE on either plot is destroyed. [PROVISIONAL] edge rules (not in the decoded routine):
+   * the direction is random and the other side is tried if it is off the map, river, town or already 3 peaks; otherwise no slide.
+   */
+  slide(state, rng) {
+    const src = rng.pick(state.plots.filter((q) => q.terrain === TERRAIN.MOUNTAIN));
+    if (!src) return null;
+    const dirs = rng.int(2) ? [1, -1] : [-1, 1];
+    const dst = dirs.map((d) => state.plots.find((q) => q.y === src.y && q.x === src.x + d))
+      .find((q) => q && (q.terrain === TERRAIN.PLAIN || (q.terrain === TERRAIN.MOUNTAIN && q.richness < 3)));
+    if (!dst) return null;
+    src.richness -= 1; if (src.richness === 0) src.terrain = TERRAIN.PLAIN;
+    if (dst.terrain === TERRAIN.PLAIN) { dst.terrain = TERRAIN.MOUNTAIN; dst.richness = 1; } else dst.richness += 1;
+    this.destroyRuc(state, src); this.destroyRuc(state, dst);
+    return { from: src.id, to: dst.id };
+  },
+  /**
+   * Applies the effect at once (through the ledger) and returns the card record, whose text carries the numbers applied. A planetary
+   * event with no valid target (pest, radiation; pest also before this round's production) returns null: a quiet round.
+   */
   build(state, rng, id, targetId) {
     const def = EVENT_DEFS[id]; const m = state.modifiers;
     let target = targetId ? playerById(state, targetId) : null;
-    const params = { who: target ? target.name : '', amount: def.amount, foodPct: def.foodPct, energyPct: def.energyPct, smithorePct: def.smithorePct };
-    const pickPlot = (pred) => {
-      const plot = rng.pick(state.plots.filter(pred));
-      target = playerById(state, plot.ownerId); params.who = target.name; params.plot = plot.id + 1;
-      return plot;
-    };
-    const pct = (cur, delta) => Math.round(cur * (100 + delta) / 100);
-    if (id === 'pest_attack') m.zeroPlots.push({ plotId: pickPlot((q) => q.ruc && q.ruc.module === 'food').id, reason: 'pest' });
-    if (id === 'acid_rain') { m.foodPct = pct(m.foodPct, def.foodPct); m.energyPct = pct(m.energyPct, -def.energyPct); }
-    if (id === 'solar_activity') m.energyPct = pct(m.energyPct, def.energyPct);
-    if (id === 'planetquake') m.smithorePct = pct(m.smithorePct, -def.smithorePct);
-    if (id === 'radiation') { const plot = pickPlot((q) => q.ruc); plot.ruc = null; StoreSystem.loseRuc(state); }
-    if (id === 'store_fire') {
-      params.lost = enabledResources().map((d) => {
-        const n = state.store.stock[d.id] || 0;
-        if (n > 0) ResourceLedger.moveItem(state, d.id, 'store', 'nature', n);
-        return `${d.label.toLowerCase()} ${n}`;
-      }).join(', ');
+    const params = {};
+    const top2 = this.rank(state).slice(0, 2);
+    if (def.scope === 'individual') {
+      const a = this.amount(state, id, targetId); Object.assign(params, a, { amount: a.total });
+      if (this.isMoney(id)) {
+        if (def.quality > 0) ResourceLedger.moveCash(state, 'nature', targetId, a.total);
+        else if (!ResourceLedger.moveCash(state, targetId, 'nature', a.total)) return null;
+      }
+      if (id === 'package') { ResourceLedger.moveItem(state, 'food', 'nature', targetId, 3); ResourceLedger.moveItem(state, 'energy', 'nature', targetId, 2); }
+      if (id === 'traveler') ResourceLedger.moveItem(state, 'smithore', 'nature', targetId, 2);
+      if (id === 'glac_elves') { const f = target.inventory.food || 0; const n = f - Math.floor(f / 2); if (n > 0) ResourceLedger.moveItem(state, 'food', targetId, 'nature', n); }
+      if (id === 'lost_plot') {
+        const plot = state.plots.filter((q) => q.ownerId === targetId).sort((x, y) => y.id - x.id)[0];
+        this.destroyRuc(state, plot); plot.ownerId = null; target.plots = target.plots.filter((k) => k !== plot.id); params.plot = plot.id + 1;
+      }
+      if (id === 'extra_plot') { const plot = rng.pick(LandGrantSystem.freePlots(state)); LandGrantSystem.assign(state, targetId, plot.id); params.plot = plot.id + 1; }
+    } else {
+      if (id === 'pest_attack') {
+        const plot = this.scanPlots(state, rng, (q) => {
+          if (!q.ruc || q.ruc.module !== 'food' || !top2.includes(q.ownerId)) return false;
+          const h = this.harvestOf(state, q.id); return !!h && h.item.amount > 0;
+        });
+        if (!plot) return null;
+        const { row, item } = this.harvestOf(state, plot.id); const n = item.amount;
+        target = playerById(state, plot.ownerId);
+        ResourceLedger.moveItem(state, 'food', target.id, 'nature', n);
+        row.produced.food -= n; row.final.food -= n; item.amount = 0; item.zeroed = 'pest';
+        Object.assign(params, { plot: plot.id + 1, amount: n });
+      }
+      if (id === 'pirates') {
+        // [Atari code] Standard: every player's smithore AND the store's, and this round's smithore production (Tournament: crystite, Phase B).
+        params.amount = 0;
+        state.players.forEach((p) => {
+          const k = p.inventory.smithore || 0;
+          const st = state.settlement && state.settlement.turn === state.turn ? state.settlement.rows.find((r) => r.playerId === p.id) : null;
+          if (st && st.produced.smithore !== undefined) {
+            st.lost.smithore += k - st.produced.smithore; st.produced.smithore = 0; st.final.smithore = 0;
+            st.items.forEach((it) => { if (it.module === 'smithore' && it.amount > 0) { it.amount = 0; it.zeroed = 'pirates'; } });
+          }
+          if (k > 0) { ResourceLedger.moveItem(state, 'smithore', p.id, 'nature', k); params.amount += k; }
+        });
+        const s = state.store.stock.smithore || 0;
+        if (s > 0) { ResourceLedger.moveItem(state, 'smithore', 'store', 'nature', s); params.amount += s; }
+      }
+      if (id === 'store_fire') {
+        ['food', 'energy', 'smithore'].forEach((r) => { const n = state.store.stock[r] || 0; if (n > 0) ResourceLedger.moveItem(state, r, 'store', 'nature', n); });
+      }
+      if (id === 'acid_rain') { m.acidRow = rng.int(CONFIG.ROWS); params.row = m.acidRow; }
+      if (id === 'sunspot') m.sunspot = true;
+      if (id === 'planetquake') { m.quake = true; params.slide = rng.int(2) ? this.slide(state, rng) : null; }
+      if (id === 'meteorite') {
+        // [Atari code] a plot that is not town or river with crystite < 3 gets a level-4 deposit (kept for Phase B) and loses its MULE.
+        const plot = rng.pick(state.plots.filter((q) => q.terrain !== TERRAIN.TOWN && q.terrain !== TERRAIN.RIVER && (q.hiddenDeposit || 0) < 3));
+        if (!plot) return null;
+        plot.hiddenDeposit = 4;
+        Object.assign(params, { plot: plot.id + 1, mule: this.destroyRuc(state, plot) });
+      }
+      if (id === 'radiation') {
+        const plot = this.scanPlots(state, rng, (q) => !!q.ruc && top2.includes(q.ownerId));
+        if (!plot) return null;
+        target = playerById(state, plot.ownerId); this.destroyRuc(state, plot); params.plot = plot.id + 1;
+      }
     }
-    if (id === 'pirates') {
-      // [manual] Standard: the Pirate plunders everyone's Smithore (Crystite only in the Tournament game, Phase B).
-      params.amount = 0;
-      state.players.forEach((p) => { const k = p.inventory.smithore || 0; if (k > 0) { ResourceLedger.moveItem(state, 'smithore', p.id, 'nature', k); params.amount += k; } });
-    }
-    if (id === 'rich_vein') ResourceLedger.moveItem(state, 'smithore', 'nature', targetId, def.amount);
-    if (id === 'salvage') ResourceLedger.moveCash(state, 'nature', targetId, def.amount);
-    if (id === 'medical_bill') { params.amount = Math.min(def.amount, target.cash); ResourceLedger.moveCash(state, targetId, 'store', params.amount); }
-    if (id === 'ruc_breakdown') {
-      const plot = rng.pick(state.plots.filter((q) => q.ownerId === targetId && q.ruc));
-      params.plot = plot.id + 1; m.zeroPlots.push({ plotId: plot.id, reason: 'breakdown' });
-    }
+    params.who = target ? target.name : '';
     const rec = {
-      id, scope: def.scope, negative: def.negative, name: def.name, art: def.art, origin: def.origin, provisional: !!def.provisional,
-      targetId: target ? target.id : null, text: def.text(params), params
+      id, scope: def.scope, negative: def.scope === 'individual' ? def.quality < 0 : def.negative, name: def.name, art: def.art, origin: def.origin,
+      provisional: false, targetId: target ? target.id : null, text: def.text(params), params
     };
     if (target) target.eventLog.push({ turn: state.turn, id, text: rec.text });
     return rec;
@@ -957,10 +1157,11 @@ const EventSystem = {
 };
 
 const ScoringSystem = {
-  price(state, res) { return state.lastAvg[res] || RESOURCE_DEFS[res].basePrice; },
+  /** [Atari code] goods are valued at the store's current price P. */
+  price(state, res) { return StoreSystem.price(state, RESOURCE_DEFS[res]); },
   /**
-   * [manual] net worth = cash + goods at the latest auction price + $500 per plot + installed RUCs. The RUC is split into robot
-   * (CONFIG.RUC_WORTH, [PROVISIONAL]) and module (its outfitting cost, [PROVISIONAL] inferred from the manual's summary example).
+   * [Atari code] net worth = cash + goods at P + $500 per plot + for each installed RUC its outfit cost + $35 (CONFIG.RUC_WORTH).
+   * [C64] open question: the first Status Summary shows GOODS 150 for 4 food + 2 energy, while P 30/25 gives 170 (see README).
    */
   breakdown(state, p) {
     const goods = enabledResources().reduce((s, d) => s + (p.inventory[d.id] || 0) * this.price(state, d.id), 0);
@@ -977,6 +1178,18 @@ const ScoringSystem = {
     const worths = state.players.map((p) => this.netWorth(state, p));
     state.players.forEach((p, i) => { p.lastTurnNetWorth = worths[i]; p.score = worths[i]; });
     state.history.push({ turn: state.turn, worth: worths.slice() });
+  },
+  /**
+   * [Atari code] "Colony difficulties": with no Food M.U.L.E. in the colony and no food anywhere (colonists + store) the colony fails
+   * at once; the same for Energy. Returns 'food', 'energy' or null. [PROVISIONAL] checked at the end of each round (exact moment unknown).
+   */
+  colonyFailure(state) {
+    for (const res of ['food', 'energy']) {
+      const rucs = state.plots.some((q) => q.ruc && q.ruc.module === res);
+      const units = state.players.reduce((s, p) => s + (p.inventory[res] || 0), state.store.stock[res] || 0);
+      if (!rucs && units === 0) return res;
+    }
+    return null;
   },
   /** [manual] Standard: the colony succeeds with a combined net worth of at least $60,000. There is no per-colonist minimum. */
   survival(state) {
@@ -1028,12 +1241,12 @@ class AuctionEngine {
       id: def.id, label: def.label, minPrice: def.minPrice, maxPrice: def.maxPrice, step: def.auctionStep,
       // Colonist-to-colonist limit while the store is out of stock: [manual] there is no rule cap; this is only a UI technical limit.
       playerMaxPrice: Math.max(def.maxPrice, CONFIG.AUCTION.playerPriceMax),
-      basePrice: def.basePrice, storeTargetStock: def.storeTargetStock, kind: 'fungible',
+      basePrice: def.basePrice, priceFloor: def.priceFloor, storeBuyOff: def.storeBuyOff, storeSellOff: def.storeSellOff, storeTargetStock: def.storeTargetStock, kind: 'fungible',
       createLot(state, sellerId) {
         return {
           id: `${def.id}:${sellerId}`, kind: 'fungible', quantity: 1, sellerId,
           transferable: ResourceLedger.stock(state, sellerId, def.id) >= 1,
-          getValue: () => state.lastAvg[def.id] || def.basePrice,
+          getValue: () => StoreSystem.price(state, def),
           transfer: (st, toId) => ResourceLedger.moveItem(st, def.id, sellerId, toId, 1)
         };
       }
@@ -1080,9 +1293,8 @@ class AuctionEngine {
   canDeclare() { return !this.ended && this.stage === 'declare'; }
   /** Start marker of a role: [manual] sellers start at the top (store selling price), buyers at the bottom (store buying price). */
   rolePrice(role) {
-    const stock = this.state.store.stock[this.market.id] || 0;
-    if (role === ROLE.SELLER) return this.withStore ? StoreSystem.ask(this.market, stock) : this.market.maxPrice;
-    return this.withStore ? StoreSystem.bid(this.market, stock) : this.market.minPrice;
+    if (role === ROLE.SELLER) return this.withStore ? StoreSystem.ask(this.state, this.market) : this.market.maxPrice;
+    return this.withStore ? StoreSystem.bid(this.state, this.market) : this.market.minPrice;
   }
   /** Only while the declaration lasts; afterwards the role is fixed. Returns true when the entry now has the requested role. */
   setRole(id, role) {
@@ -1105,19 +1317,21 @@ class AuctionEngine {
     const e = this.entry(id);
     this.setPrice(id, e.priceF + dir * this.market.step * stepsPerSec * dtMs / 1000);
   }
-  centralPrice() { return StoreSystem.centralPrice(this.market, this.state.store.stock[this.market.id] || 0); }
+  /** The store's price P of this good ([Atari code]; its buy / sell lines are P - buyOff / P + sellOff). */
+  centralPrice() { return StoreSystem.price(this.state, this.market); }
 
   _updateStore() {
     const stock = this.state.store.stock[this.market.id] || 0;
     const sb = this.entry('store-b'); const ss = this.entry('store-s');
     const central = this.centralPrice();
     const idle = this.t - this.lastActivity;
-    // [PROVISIONAL] after 5 s without trades the store closes its spread one step every 2 s, but never past the central price.
+    // [PROVISIONAL] after 5 s without trades the store closes its spread one step every 2 s, but never past P (auction behaviour,
+    // not from the original: left for the auction batch).
     const n = this.stage === 'trade' && idle >= CONFIG.AUCTION.storeIdleMs ? 1 + Math.floor((idle - CONFIG.AUCTION.storeIdleMs) / CONFIG.AUCTION.storeNudgeMs) : 0;
     const step = this.market.step;
     const put = (e, v) => { const p = clamp(v, this.market.minPrice, this.market.maxPrice); if (p !== e.price) { e.price = p; e.priceSince = this.clock; } e.priceF = p; };
-    put(ss, Math.max(StoreSystem.ask(this.market, stock) - n * step, central));
-    put(sb, Math.min(StoreSystem.bid(this.market, stock) + n * step, central));
+    put(ss, Math.max(StoreSystem.ask(this.state, this.market) - n * step, central));
+    put(sb, Math.min(StoreSystem.bid(this.state, this.market) + n * step, central));
     ss.role = stock >= 1 ? ROLE.SELLER : ROLE.OUT;
     sb.role = stock < CONFIG.AUCTION.storeBuyCap ? ROLE.BUYER : ROLE.OUT;
     // When the store gets stock back, colonist markers fall back under the store ceiling.
@@ -1263,12 +1477,11 @@ const AISystem = {
     const def = engine.market; const res = def.id;
     const prof = this.profile(p); const d = this.diff(state);
     const inv = p.inventory[res] || 0; const reserve = this.reserve(state, p, res);
-    const stock = state.store.stock[res] || 0;
-    const central = StoreSystem.centralPrice(def, stock);
+    const central = StoreSystem.price(state, def);
     const err = (rng.next() * 2 - 1) * d.valuationErr / 100;
     const val = central * (1 + err);
     const progress = clamp(engine.t / (CONFIG.AUCTION.maxMs * 0.7), 0, 1);
-    const storeBid = StoreSystem.bid(def, stock); const storeAsk = StoreSystem.ask(def, stock);
+    const storeBid = StoreSystem.bid(state, def); const storeAsk = StoreSystem.ask(state, def);
     const cap = (price) => prof.extremeGuard ? clamp(price, def.basePrice * 0.7, def.basePrice * 1.4) : price;
     const cash = p.cash;
     if (inv > reserve) {
@@ -1361,14 +1574,14 @@ const AISystem = {
 
 /**
  * [manual] Development order: from the leader to the last colonist by net worth ("the last place player moves last"), reversed
- * ("moves first") when there are fewer than 7 M.U.L.E.s in the corral. Worked out once when development starts, kept in the save.
+ * ([Atari code]) when the corral has 7 M.U.L.E.s or fewer. Worked out once when development starts, kept in the save.
  * Ties: [PROVISIONAL] stable by player order.
  */
 const DevOrder = {
   create(state) {
     const w = new Map(state.players.map((p) => [p.id, ScoringSystem.netWorth(state, p)]));
     const order = state.players.map((p, i) => ({ id: p.id, i })).sort((a, b) => (w.get(b.id) - w.get(a.id)) || (a.i - b.i)).map((x) => x.id);
-    const reversed = state.store.ruc < CONFIG.DEV.lowCorral;
+    const reversed = state.store.ruc <= CONFIG.DEV.lowCorral;
     return { order: reversed ? order.reverse() : order, reversed, corral: state.store.ruc, idx: 0, slot: null };
   }
 };
@@ -1675,7 +1888,7 @@ class SetupScreen {
     Object.entries(CONFIG.DIFFICULTY).forEach(([id, d], i) => {
       const x = 220 + i * 280;
       r.button(`s-diff-${id}`, d.label, x, 346, 264, 52, { checked: st.difficulty === id, onClick: () => { st.difficulty = id; } });
-      r.text(`IA ${d.reactMin}-${d.reactMax} ms · reserva ${d.minReserve} · ${d.humanTimeMs / 1000} s`, x, 404, { size: 16, color: COL.dim, maxW: 270 });
+      r.text(`IA ${d.reactMin}-${d.reactMax} ms · reserva ${d.minReserve} · temps segons el menjar`, x, 404, { size: 16, color: COL.dim, maxW: 270 });
     });
     r.wrap('Rivals: Bran (conservador), Vela (industrial) i Nox (oportunista). Durada orientativa: 35-50 minuts. La mateixa llavor i les mateixes accions donen el mateix resultat.', 220, 460, 840, 24, { size: 18, color: COL.text });
     r.button('s-start', 'Començar', 220, 600, 300, 56, { primary: true, size: 22, onClick: () => game.newGame({ seed: st.seed, difficulty: st.difficulty, playerName: st.name, colorId: st.color }) });
@@ -1687,7 +1900,7 @@ const HELP_LINES = [
   ['Objectiu', 'Acaba amb el patrimoni net més alt. Si la colònia no suma 60.000 cr al final, ha fracassat i no hi ha First Founder.'],
   ['Cada torn', 'Terra (cursa) · desenvolupament per ordre de patrimoni · esdeveniment planetari · producció · estat (consum i malbaratament) · subhastes de smithore, menjar i energia.'],
   ['Terra', 'La selecció recorre el mapa una sola vegada. Clica o prem Enter quan és sobre una parcel·la lliure. Qui no reclama, aquest torn es queda sense.'],
-  ['Desenvolupament', 'Camina amb les fletxes o el control tàctil. Entra al corral (compra un RUC), a un taller (l\'equipes) i porta\'l a la casa d\'una parcel·la teva: Acció l\'instal·la. Acció fora de la casa o temps esgotat amb el RUC: fuig. Tornar-lo al corral retorna el preu del robot, no l\'equip.'],
+  ['Desenvolupament', 'Camina amb les fletxes o el control tàctil. Entra al corral (compra un RUC), a un taller (l\'equipes) i porta\'l a la casa d\'una parcel·la teva: Acció l\'instal·la. Acció fora de la casa o temps esgotat amb el RUC: fuig. Tornar-lo al corral retorna el preu del robot, no l\'equip. El temps depèn del menjar que tens a l\'inici del torn.'],
   ['Producció', 'Els RUCs de menjar i smithore gasten 1 energia de la reserva; els d\'energia s\'autoalimenten. +1 si un veí teu fa el mateix, +1 per cada grup de 3 parcel·les teves iguals. La base és una mitjana: la collita varia.'],
   ['Estat', 'Després de menjar es malbarata el 50% del menjar i el 25% de l\'energia que queden de reserva (smithore, només per sobre de 50). La collita nova no es malbarata.'],
   ['Subhasta', 'Primer declara comprador, venedor o fora abans que s\'acabi el comptador; després el rol queda fix i només mous el preu. Tracte quan les línies es toquen 0,5 s.'],
@@ -1752,7 +1965,8 @@ const MapLayer = {
     return c;
   },
   get(game) {
-    const k = `${game.state.seed}|${game.assets.settled}|${game.assets.failed.size}`;
+    // The terrain is part of the key: a planetquake slide changes it mid-game.
+    const k = `${game.state.seed}|${game.assets.settled}|${game.assets.failed.size}|${game.state.plots.map((p) => p.richness).join('')}`;
     if (k !== this.key || !this.canvas) { this.canvas = this.build(game); this.key = k; }
     return this.canvas;
   }
@@ -1994,13 +2208,14 @@ class MapScreen {
     this.drawPlayers(game, r);
     this.drawBottom(game, r);
     const slot = game.devSlot();
-    if (game.turns.phase === 'PLANET_EVENT') this.drawEventCards(game, r, game.turns.phaseData.items || [], 'Cap esdeveniment planetari aquest torn.');
+    const planet = game.turns.phase === 'PLANET_EVENT' || game.turns.phase === 'PLANET_EVENT_AFTER';
+    if (planet && (game.turns.phaseData.items || []).length) this.drawEventCards(game, r, game.turns.phaseData.items, '');
     else if (slot && slot.stage === 'card') this.drawEventCards(game, r, [slot.event], '');
     else if (slot && slot.stage === 'countdown') this.drawTurnCountdown(game, r, slot);
     const ptr = game.input.pointer; const under = inTown ? null : this.plotAt(game, ptr.x, ptr.y);
     const kbd = !walk && r.focusId === 'map' && r.showFocus ? s.plots[this.cursor] : null;
     const tipPlot = under || kbd;
-    const cards = game.turns.phase === 'PLANET_EVENT' || (slot && slot.stage === 'card');
+    const cards = planet || (slot && slot.stage === 'card');
     if (tipPlot && !game.paused && !cards) {
       const tr = this.plotRect(tipPlot);
       this.drawTooltip(game, r, tipPlot, under ? ptr.x : tr.x + 40, under ? ptr.y : tr.y + 40);
@@ -2037,7 +2252,7 @@ class MapScreen {
     enabledResources().forEach((d, k) => {
       const st = s.store.stock[d.id];
       r.icon(d.id, X + 10, y + 32 + k * 30, 24);
-      r.text(`${st} u · compra ${StoreSystem.bid(d, st)} · ven ${st > 0 ? StoreSystem.ask(d, st) : '—'}`, X + 42, y + 34 + k * 30, { size: 16, maxW: 316 });
+      r.text(`${st} u · compra ${StoreSystem.bid(s, d)} · ven ${st > 0 ? StoreSystem.ask(s, d) : '—'}`, X + 42, y + 34 + k * 30, { size: 16, maxW: 316 });
     });
     r.text(`Corral: ${s.store.ruc} RUCs · ${StoreSystem.rucPrice(s)} cr`, X + 10, y + 34 + 3 * 30, { size: 16 });
   }
@@ -2101,7 +2316,7 @@ class MapScreen {
       r.button('d-card', 'Continuar (Enter)', X + 84, Y + 72, 240, 40, { primary: true, onClick: () => game.devSkipCard() });
       return;
     }
-    r.text(`Torn de desenvolupament de ${who.name}${dev.reversed ? ' · corral amb menys de 7 RUCs: ordre invers' : ''}`, X + 84, Y + 8, { size: 18, maxW: 770 });
+    r.text(`Torn de desenvolupament de ${who.name}${dev.reversed ? ' · corral amb 7 RUCs o menys: ordre invers' : ''}`, X + 84, Y + 8, { size: 18, maxW: 770 });
     (slot.log || []).slice(0, 3).forEach((l, i) => r.text(l, X + 84, Y + 36 + i * 24, { size: 16, color: COL.dim, maxW: 770 }));
   }
   /**
@@ -2135,7 +2350,7 @@ class MapScreen {
       r.text(ev.name, x + w / 2, y + 40, { size: 26, color: ev.negative ? COL.bad : COL.good, align: 'center', maxW: w - 20 });
       r.assetFrame('event_cards_strip', x + 40, y + 88, w - 80, 220, ev.art);
       r.wrap(ev.text, x + 20, y + 320, w - 40, 24, { size: 18, align: 'center' });
-      const note = ev.origin === 'ruc' ? 'Esdeveniment propi de R.U.C. (no C64)' : ev.provisional ? 'Tipus C64 · xifra provisional, no verificada' : 'Tipus C64';
+      const note = ev.origin === 'c64' ? 'Esdeveniment original (C64)' : 'Esdeveniment propi de R.U.C. (no C64)';
       r.text(note, x + w / 2, y + 430, { size: 16, color: COL.dim, align: 'center', maxW: w - 20 });
     });
     const skip = () => { if (game.turns.phase === 'DEVELOPMENT') game.devSkipCard(); else game.skipPhase(); };
@@ -2169,7 +2384,7 @@ class ProductionScreen {
             r.text(`+${rec.o.amount}`, x + 34, y + 10 - Math.round(rise * 8), { size: 18, color: COL.good });
           } else {
             ctx.fillStyle = 'rgba(6,9,18,0.8)'; ctx.fillRect(x + 4, y + 4, 88, 26);
-            const why = rec.o.zeroed === 'pest' ? '✕ plaga' : rec.o.zeroed === 'breakdown' ? '✕ avaria' : rec.o.active ? '0' : '✕ sense E';
+            const why = rec.o.active ? '0' : '✕ sense E';
             r.text(why, x + 8, y + 8, { size: 16, color: COL.bad });
           }
         }
@@ -2210,7 +2425,7 @@ class ReportScreen {
     const s = game.state; const st = s.settlement; const res = enabledResources();
     r.panel(40, 70, 1200, 640, {});
     r.text(`Estat del torn ${s.turn}: reserva, consum, malbaratament i collita`, 70, 84, { size: 26, color: COL.amber });
-    r.wrap(`Cada colon menja ${st.need} de menjar (valor provisional). Després es malbarata el 50% del menjar i el 25% de l'energia que queden a la reserva (smithore: només per sobre de 50). La collita nova arriba després i no es malbarata.`, 70, 122, 1140, 22, { size: 16, color: COL.dim });
+    r.wrap(`Cada colon menja ${st.need} de menjar. Després es malbarata el 50% del menjar i el 25% de l'energia que queden a la reserva (smithore: només per sobre de 50). La collita nova arriba després i no es malbarata.`, 70, 122, 1140, 22, { size: 16, color: COL.dim });
     const cx = (k) => 280 + k * 310;
     r.text('Cada casella: reserva − ús − malbaratat + collita nova = final', 280, 160, { size: 16, color: COL.cyan, maxW: 930 });
     res.forEach((d, k) => { r.icon(d.id, cx(k), 184, 22); r.text(d.label, cx(k) + 28, 186, { size: 16, color: COL.dim, maxW: 270 }); });
@@ -2218,10 +2433,13 @@ class ReportScreen {
       const p = playerById(s, row.playerId); const y = 218 + i * 86;
       r.glyph(p.shape, 80, y + 12, 9, p.color, '#05070d');
       r.text(p.name, 100, y, { size: 20, color: p.isHuman ? COL.amber : COL.text, maxW: 170 });
-      res.forEach((d, k) => r.text(`${row.start[d.id]} −${row.used[d.id]} −${row.spoiled[d.id]} +${row.produced[d.id]} = ${row.final[d.id]}`, cx(k), y, { size: 20, maxW: 300 }));
+      res.forEach((d, k) => r.text(`${row.start[d.id]} −${row.used[d.id]} −${row.spoiled[d.id]} +${row.produced[d.id]}${row.lost && row.lost[d.id] ? ` −${row.lost[d.id]}` : ''} = ${row.final[d.id]}`, cx(k), y, { size: 20, maxW: 300 }));
       const notes = [];
-      if (row.missingFood) notes.push(`falta menjar ${row.missingFood}: -${row.missingFood * CONFIG.SHORTAGE.timePenaltyPct}% de temps de desenvolupament el torn vinent`);
+      if (row.missingFood) notes.push(`falta menjar ${row.missingFood}: el temps de desenvolupament depèn del menjar que tinguis a l'inici del torn`);
       if (row.stopped) notes.push(`${row.stopped} RUC sense energia (aturat)`);
+      const hit = row.items.filter((it) => it.zeroed).map((it) => `parcel·la #${it.plotId + 1}: ${it.zeroed === 'pest' ? 'plaga' : 'pirates'}`);
+      if (hit.length) notes.push(`collita perduda (${hit.join(', ')})`);
+      if (row.lost && row.lost.smithore) notes.push(`els pirates s'enduen ${row.lost.smithore} de smithore de la reserva`);
       r.text(notes.join(' · ') || 'cap penalització', 100, y + 30, { size: 16, color: notes.length ? COL.bad : COL.dim, maxW: 1100 });
     });
     r.button('rep-next', 'A les subhastes', 500, 640, 280, 50, { primary: true, onClick: () => game.skipPhase() });
@@ -2253,7 +2471,7 @@ class ReportScreen {
     const st = game.rt.storeReport || { rucsMade: 0 };
     r.text(`RUCs fabricats: ${st.rucsMade} (corral ${s.store.ruc})`, 760, 372, { size: 18, maxW: 460 });
     r.text('Sense reposició gratuïta de menjar ni energia.', 760, 402, { size: 16, color: COL.dim, maxW: 460 });
-    enabledResources().forEach((d, i) => r.text(`${d.label}: ${s.store.stock[d.id]} u · ${StoreSystem.centralPrice(d, s.store.stock[d.id])} cr`, 760, 432 + i * 26, { size: 16, maxW: 460 }));
+    enabledResources().forEach((d, i) => r.text(`${d.label}: ${s.store.stock[d.id]} u · preu ${StoreSystem.price(s, d)} cr (compra ${StoreSystem.bid(s, d)} · ven ${StoreSystem.ask(s, d)})`, 760, 432 + i * 26, { size: 16, maxW: 460 }));
     const surv = ScoringSystem.survival(s);
     r.text(`Patrimoni de la colònia: ${surv.combined} cr (cal ${surv.needCombined} al final del torn ${CONFIG.TURNS})`, 70, 530, { size: 18, color: surv.survives ? COL.good : COL.amber, maxW: 1100 });
     (s.event && s.event.items || []).slice(0, 3).forEach((ev, i) => r.text(`${ev.scope === 'planet' ? 'Planetari' : 'Individual'}: ${ev.text}`, 70, 566 + i * 24, { size: 16, color: COL.dim, maxW: 1100 }));
@@ -2421,7 +2639,7 @@ class GameOverScreen {
     const s = game.state; const f = s.final;
     r.asset('bg_irata_sky', 0, 0, CONFIG.W, CONFIG.H); r.dim(0.66);
     r.panel(30, 20, 1220, 680, {});
-    r.text(f.survives ? 'La colònia ha prosperat' : 'La colònia ha fracassat', 60, 34, { size: 32, color: f.survives ? COL.good : COL.bad });
+    r.text(f.survives ? 'La colònia ha prosperat' : f.lack ? GameOverScreen.lackText(f.lack) : 'La colònia ha fracassat', 60, 34, { size: 32, color: f.survives ? COL.good : COL.bad, maxW: 690 });
     r.text(f.survives ? `First Founder: ${playerById(s, f.winnerId).name}` : 'Sense First Founder', 760, 44, { size: 24, color: COL.amber, maxW: 470 });
     r.text(`Patrimoni de la colònia ${f.combined} cr (cal ${CONFIG.SURVIVAL.combined}).${f.survives ? '' : ' La classificació es mostra igualment.'}`, 60, 80, { size: 18, maxW: 1150 });
     const cols = [['Pos.', 60], ['Colon', 120], ['Efectiu', 300], ['Béns', 400], ['Parcel·les', 500], ['RUCs', 630], ['Mòduls', 720], ['Patrimoni', 830]];
@@ -2439,12 +2657,14 @@ class GameOverScreen {
       const log = s.auctionLog.filter((x) => x.res === d.id); const vol = log.reduce((a, b) => a + b.volume, 0);
       r.icon(d.id, 740, 326 + i * 36, 24); r.text(`${d.label}: ${vol} unitats`, 774, 328 + i * 36, { size: 18 });
     });
-    r.wrap(`Patrimoni: efectiu + béns (a l'últim preu mitjà de subhasta) + ${CONFIG.PLOT_VALUE}/parcel·la + RUCs instal·lats (robot ${CONFIG.RUC_WORTH} provisional + cost del mòdul). Sense cap deute.`, 740, 450, 480, 22, { size: 16, color: COL.dim });
+    r.wrap(`Patrimoni: efectiu + béns (al preu de la botiga) + ${CONFIG.PLOT_VALUE}/parcel·la + RUCs instal·lats (${CONFIG.RUC_WORTH} + cost del mòdul). Sense cap deute.`, 740, 450, 480, 22, { size: 16, color: COL.dim });
     r.button('g-same', 'Repetir llavor', 60, 630, 240, 52, { onClick: () => game.newGame({ seed: s.seed, difficulty: s.difficulty, playerName: s.players[0].name, colorId: colorIdOf(s.players[0].color) }) });
     r.button('g-new', 'Nova llavor', 320, 630, 240, 52, { primary: true, onClick: () => game.newGame({ seed: game.randomSeed(), difficulty: s.difficulty, playerName: s.players[0].name, colorId: colorIdOf(s.players[0].color) }) });
     r.button('g-title', 'Títol', 580, 630, 160, 52, { onClick: () => game.goTitle() });
     r.text(`Llavor: ${s.seed}`, 780, 646, { size: 18, color: COL.dim });
   }
+  /** [Atari code] "THE COLONY FAILED BECAUSE OF A TOTAL LACK OF FOOD / ENERGY!", in Catalan. */
+  static lackText(res) { return `La colònia ha fracassat per una manca total ${res === 'food' ? 'de menjar' : "d'energia"}!`; }
   drawWorthChart(game, r, x, y, w, h) {
     const s = game.state; const c = r.ctx; const hist = s.history;
     c.fillStyle = 'rgba(6,9,18,0.7)'; c.fillRect(x, y, w, h); c.strokeStyle = COL.border; c.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
@@ -2800,10 +3020,14 @@ class Game {
     this.snapshotPhase();
     SaveSystem.save(this.state, this.rng);
   }
-  /** [manual] the colony must reach 60,000; only then is the leader the First Founder. The ranking is shown either way. */
-  finish() {
+  /**
+   * [manual] the colony must reach 60,000; only then is the leader the First Founder. The ranking is shown either way.
+   * `lack` ('food' / 'energy'): [Atari code] the colony failed early for a total lack of that good (ScoringSystem.colonyFailure).
+   */
+  finish(lack = null) {
     const s = this.state; const surv = ScoringSystem.survival(s); const rank = ScoringSystem.ranking(s, this.rng);
-    s.final = { survives: surv.survives, combined: surv.combined, winnerId: surv.survives ? rank[0].p.id : null, rank: rank.map((x) => ({ id: x.p.id, b: x.b })) };
+    const survives = surv.survives && !lack;
+    s.final = { survives, combined: surv.combined, winnerId: survives ? rank[0].p.id : null, lack, rank: rank.map((x) => ({ id: x.p.id, b: x.b })) };
     s.phase = 'GAME_OVER'; this.turns.phase = null; this.setScreen('gameover'); this.save();
   }
 
@@ -2896,6 +3120,7 @@ class Game {
       return slot.stage === 'card' ? 'Esdeveniment individual' : `Desenvolupament: torn de ${playerById(this.state, slot.pid).name}`;
     }
     if (ph === 'PLANET_EVENT') return 'Esdeveniment planetari abans de la producció';
+    if (ph === 'PLANET_EVENT_AFTER') return 'Esdeveniment planetari després de la producció';
     return ph ? this.turns.get(ph).label : '';
   }
 
@@ -2917,7 +3142,7 @@ class Game {
     this.audio.play(w.bad ? 'error' : kind === 'install' ? 'phase' : 'click');
     if (w.msg) this.announce(w.msg);
   }
-  /** Starts the colonist whose turn it is: [manual] its own 25% individual event draw, then the walk (human) or the AI's moves. */
+  /** Starts the colonist whose turn it is: [Atari code] its own personal event draw (27.5 %), then the walk (human) or the AI's moves. */
   startDevSlot() {
     const dev = this.turns.phaseData.dev; const s = this.state;
     if (dev.idx >= dev.order.length) { this.turns.canAdvance = true; return; }
@@ -2932,7 +3157,7 @@ class Game {
       slot.stage = ev ? 'card' : 'countdown'; slot.timer = ev ? 6000 : CONFIG.DEV.countdownMs;
       this.announce(ev ? ev.text : `Prepara't: el teu torn de desenvolupament comença en ${Math.ceil(CONFIG.DEV.countdownMs / 1000)} s.`);
     } else {
-      if (ev) slot.log.push(ev.text);
+      if (ev) slot.log.push(`${p.name}: ${ev.text}`);
       const acts = AISystem.develop(s, this.rng, p);
       acts.forEach((a) => slot.log.push(`${p.name}: RUC de ${resLabel(a.module).toLowerCase()} a la parcel·la ${a.plotId + 1}`));
       if (!acts.length) slot.log.push(`${p.name} no instal·la cap RUC aquest torn.`);
@@ -2964,6 +3189,13 @@ class Game {
     // Boundary save between colonists: a reload starts the next colonist's turn (and its event draw) exactly once.
     this.save();
     this.startDevSlot();
+  }
+  /** Shows a planetary card; a quiet round (no event, or no target) shows nothing and moves on at once, as the original. */
+  showPlanetCard(ts, rec) {
+    ts.phaseData.items = rec ? [rec] : []; ts.phaseData.skippable = true;
+    ts.phaseData.timer = rec ? this.fast(4000) : 0;
+    if (rec) { this.audio.play('event'); this.announce(`${rec.name}. ${rec.text}`); }
+    this.setScreen('map');
   }
   skipPhase() { if (this.turns.phaseData && this.turns.phaseData.skippable) this.turns.canAdvance = true; }
 
@@ -3007,8 +3239,10 @@ class Game {
     const ids = Object.keys(EVENT_DEFS); this.debugEventIdx = ((this.debugEventIdx || 0) + 1) % ids.length;
     const id = ids[this.debugEventIdx]; const def = EVENT_DEFS[id];
     try {
-      if (!EventSystem.applicable(this.state, id, 'p0')) { this.debugLog = `${id}: ara no és aplicable`; return; }
-      const rec = EventSystem.build(this.state, this.rng, id, def.scope === 'individual' ? 'p0' : null);
+      const personal = def.scope === 'individual';
+      const ok = !personal || (EventSystem.precondition(this.state, id, 'p0') && EventSystem.affordable(this.state, id, 'p0'));
+      const rec = ok ? EventSystem.build(this.state, this.rng, id, personal ? 'p0' : null) : null;
+      if (!rec) { this.debugLog = `${id}: ara no és aplicable`; return; }
       this.state.event = this.state.event || { items: [] }; this.state.event.items.push(rec); this.debugLog = `forçat: ${id}`;
     } catch (e) { this.debugLog = `error ${e.message}`; }
   }
@@ -3030,7 +3264,7 @@ class Game {
   defineTurnPhases() {
     const timed = (g, dt, ts) => { ts.phaseData.timer -= dt; if (ts.phaseData.timer <= 0) ts.canAdvance = true; };
     const defs = [
-      { id: 'TURN_START', label: 'Inici de torn', enter: (g, ts) => { const s = g.state; s.turn += 1; s.modifiers = GameState.freshModifiers(); s.event = { items: [] }; g.rt = {}; g.setScreen('map'); ts.canAdvance = true; } },
+      { id: 'TURN_START', label: 'Inici de torn', enter: (g, ts) => { const s = g.state; s.turn += 1; s.modifiers = GameState.freshModifiers(); s.event = { items: [] }; EventSystem.rankPlayers(s, g.rng); g.rt = {}; g.setScreen('map'); ts.canAdvance = true; } },
       {
         id: 'LAND_GRANT', label: 'Adjudicació de terra', save: true, resumable: true,
         enter: (g, ts) => {
@@ -3062,14 +3296,19 @@ class Game {
         update: (g, dt) => g.updateDevelopment(dt)
       },
       {
+        // [Atari code] rounds 1-11: one ticket from the bag. "Before production" events act now; "after production" ones wait for
+        // PLANET_EVENT_AFTER. Round 12: "THE SHIP IS BACK!" and no draw. A debug-forced event replaces the draw (no ticket used).
         id: 'PLANET_EVENT', label: 'Esdeveniment planetari', save: true,
         enter: (g, ts) => {
-          const fi = g.debugForced.findIndex((id) => EVENT_DEFS[id] && EVENT_DEFS[id].scope === 'planet');
-          const rec = EventSystem.rollPlanet(g.state, g.rng, fi >= 0 ? g.debugForced.splice(fi, 1)[0] : null);
-          ts.phaseData.items = rec ? [rec] : []; if (rec) g.state.event.items.push(rec);
-          ts.phaseData.timer = g.fast(rec ? 4000 : 1300); ts.phaseData.skippable = true;
-          if (rec) g.audio.play('event');
-          g.announce(rec ? rec.text : 'Cap esdeveniment planetari'); g.setScreen('map');
+          const s = g.state; let rec = null;
+          if (s.turn >= CONFIG.TURNS) rec = EventSystem.shipBack();
+          else {
+            const fi = g.debugForced.findIndex((id) => EVENT_DEFS[id] && EVENT_DEFS[id].scope === 'planet');
+            const id = fi >= 0 ? g.debugForced.splice(fi, 1)[0] : EventSystem.drawPlanet(s, g.rng);
+            if (EVENT_DEFS[id].timing === 'after') s.events.after = id;
+            else { rec = EventSystem.build(s, g.rng, id, null); if (rec) s.event.items.push(rec); }
+          }
+          g.showPlanetCard(ts, rec);
         },
         update: timed
       },
@@ -3084,6 +3323,17 @@ class Game {
         update: (g, dt, ts) => { const p = g.rt.prod; p.t += dt; if (p.t >= p.duration + g.fast(2500)) ts.canAdvance = true; }
       },
       {
+        // [Atari code] pest, pirates and fire strike after the production has been shown.
+        id: 'PLANET_EVENT_AFTER', label: 'Esdeveniment planetari', save: true,
+        enter: (g, ts) => {
+          const s = g.state; const id = s.events.after; s.events.after = null;
+          const rec = id ? EventSystem.build(s, g.rng, id, null) : null;
+          if (rec) s.event.items.push(rec);
+          g.showPlanetCard(ts, rec);
+        },
+        update: timed
+      },
+      {
         id: 'STATUS', label: 'Estat: consum i malbaratament', save: true,
         enter: (g, ts) => { g.rt.reportMode = 'status'; ts.phaseData.timer = g.fast(400); ts.phaseData.skippable = true; g.setScreen('report'); g.announce('Estat del torn: consum, malbaratament i collita'); },
         update: (g, dt, ts) => { if (g.autopilot) timed(g, dt, ts); }
@@ -3095,7 +3345,8 @@ class Game {
         id: 'TURN_REPORT', label: 'Informe del torn', save: true,
         enter: (g, ts) => {
           const s = g.state;
-          g.rt.storeReport = StoreSystem.betweenTurns(s); ScoringSystem.endTurn(s);
+          // [PROVISIONAL] order: P for the next round's auctions first, then the M.U.L.E. build (see StoreSystem.updatePrices).
+          StoreSystem.updatePrices(s, g.rng); g.rt.storeReport = StoreSystem.betweenTurns(s); ScoringSystem.endTurn(s);
           g.rt.turnRank = ScoringSystem.ranking(s, g.rng); g.rt.auctionSummary = s.auctionLog.filter((x) => x.turn === s.turn);
           g.rt.reportMode = 'turn'; ts.phaseData.skippable = true; ts.phaseData.timer = g.fast(400); g.setScreen('report');
           g.announce(`Informe del torn ${s.turn}`);
@@ -3103,7 +3354,10 @@ class Game {
         update: (g, dt, ts) => { if (g.autopilot) timed(g, dt, ts); }
       },
       { id: 'AUTOSAVE', label: 'Desat', enter: (g, ts) => { g.save(); ts.canAdvance = true; } },
-      { id: 'NEXT', label: 'Següent / final', enter: (g, ts) => { if (g.state.turn >= CONFIG.TURNS) g.finish(); else ts.canAdvance = true; } }
+      {
+        id: 'NEXT', label: 'Següent / final',
+        enter: (g, ts) => { const lack = ScoringSystem.colonyFailure(g.state); if (lack || g.state.turn >= CONFIG.TURNS) g.finish(lack); else ts.canAdvance = true; }
+      }
     );
     this.turns.define(defs);
   }
@@ -3145,6 +3399,7 @@ class Game {
         const s = g.state; const e = g.rt.auction.engine; const res = e.result;
         s.auctionLog.push({ turn: s.turn, res: res.res, volume: res.volume, min: res.min, avg: res.avg, max: res.max });
         if (res.volume > 0) s.lastAvg[def.id] = res.avg;
+        StoreSystem.afterAuction(s, def.id, res);
         g.rt.auction.engine.ended = true;
       }
     };
@@ -3275,7 +3530,15 @@ function runSelfTests() {
     for (let i = 0; i < 50; i++) if (ProductionSystem.rollYield(state, state.plots[0], rng) !== 0) return 'the river produced smithore';
     return eq(ProductionSystem.meanYield(state, state.plots[0]), 0, 'river mean');
   });
-  t('Harvest variation (PROVISIONAL): seeded, same seed = same harvest, seeds differ, 0..8, never negative, centred on the mean', () => {
+  t('Harvest variation: [Atari code] Standard round(0.5 x binomial) -> -1/0/+1 at ~16/68/16 %, +-2 rare (~0.1 %), seeded', () => {
+    const rng = new SeededRNG('var'); const N = 40000; const n = new Map();
+    for (let i = 0; i < N; i++) { const v = ProductionSystem.variation(rng); n.set(v, (n.get(v) || 0) + 1); }
+    const pct = (v) => 100 * (n.get(v) || 0) / N;
+    if ([...n.keys()].some((v) => Math.abs(v) > 3)) return `out of range ${JSON.stringify([...n])}`;
+    if (Math.abs(pct(0) - 67.664) > 1.2 || Math.abs(pct(1) - 16.063) > 1 || Math.abs(pct(-1) - 16.063) > 1) return `0 ${pct(0)} +1 ${pct(1)} -1 ${pct(-1)}`;
+    return pct(2) + pct(-2) < 0.6 ? true : `+-2 ${pct(2) + pct(-2)} %`;
+  });
+  t('Harvest variation: seeded, same seed = same harvest, seeds differ, 0..8, never negative, centred on the mean', () => {
     const run = (seed) => { const rng = new SeededRNG(seed); const { state } = fresh(); const plot = lone(1, 0, 0, TERRAIN.RIVER, 'food'); state.plots = [plot]; return Array.from({ length: 400 }, () => ProductionSystem.rollYield(state, plot, rng)); };
     const a = run('h1'); const b = run('h1'); const c = run('h2');
     if (a.join() !== b.join()) return 'same seed gave a different harvest';
@@ -3288,14 +3551,6 @@ function runSelfTests() {
     if (ProductionSystem.meanYield(state, state.plots[0]) !== 8) return 'nine mines should average 8';
     for (let i = 0; i < 300; i++) for (const p of state.plots) { const v = ProductionSystem.rollYield(state, p, rng); if (v < 0 || v > 8) return `extreme ${v}`; }
   });
-  t('Event modifiers: after the 0..8 clamp, integer percent floored once; a zeroed plot gives 0', () => {
-    const { state } = fresh(); const p = lone(1, 0, 0, TERRAIN.PLAIN, 'energy'); state.plots = [p];
-    state.modifiers.energyPct = 70; if (ProductionSystem.expectedYield(state, p) !== 2) return `floor(3*0.7) -> ${ProductionSystem.expectedYield(state, p)}`;
-    state.modifiers.energyPct = 130; if (ProductionSystem.expectedYield(state, p) !== 3) return 'floor(3*1.3) must be 3';
-    state.modifiers.zeroPlots.push({ plotId: 1, reason: 'breakdown' });
-    return eq(ProductionSystem.expectedYield(state, p), 0, 'zeroed plot');
-  });
-
   /* ---------- P0.3 energy ---------- */
   const energyCase = (modules, energy) => {
     const { state, rng } = fresh('energy'); state.turn = 2;
@@ -3319,15 +3574,30 @@ function runSelfTests() {
     if (c.row.used.energy !== 1 || c.row.stopped !== 1) return `used ${c.row.used.energy} stopped ${c.row.stopped}`;
     return audited(c.state);
   });
+  t('Energy shortage: [Atari code] one RANDOM non-energy RUC per missing unit produces nothing (seeded; energy RUCs never hit)', () => {
+    const stopped = new Set();
+    for (let i = 0; i < 40; i++) {
+      const { state } = fresh('energy'); state.turn = 2;
+      [0, 2, 6].forEach((id, k) => develop(state, 'p0', id, ['food', 'smithore', 'energy'][k]));
+      setInv(state, 'p0', 'energy', 1);
+      const act = ProductionSystem.activation(state, state.players[0], new SeededRNG(`pick${i}`));
+      const again = ProductionSystem.activation(state, state.players[0], new SeededRNG(`pick${i}`));
+      if ([...act.on].join() !== [...again.on].join()) return 'same seed picked differently';
+      const off = act.mine.filter((q) => !act.on.has(q.id));
+      if (off.length !== 1 || off[0].ruc.module === 'energy' || act.stopped !== 1 || act.powered !== 1) return `missing 1 -> ${JSON.stringify(off.map((q) => q.ruc.module))}`;
+      stopped.add(off[0].ruc.module);
+    }
+    return stopped.size === 2 ? true : `always the same RUC stopped: ${[...stopped]}`;
+  });
 
   /* ---------- P0.1 settlement (consumption, spoilage, harvest) ---------- */
-  t('Settlement without harvest: food 6 -2 eaten -2 spoiled = 2; energy 6 -1 spoiled (25% of 6, floored) = 5', () => {
+  t('Settlement without harvest: food 4 -3 eaten -0 spoiled = 1; energy 2 -0 spoiled (25% of 2, floored) = 2', () => {
     const { state, rng } = fresh(); state.turn = 1;
     const row = SettlementSystem.run(state, rng).rows[0];
-    return `${row.used.food},${row.spoiled.food},${row.final.food},${row.spoiled.energy},${row.final.energy}` === '2,2,2,1,5' ? true : JSON.stringify(row);
+    return `${row.used.food},${row.spoiled.food},${row.final.food},${row.spoiled.energy},${row.final.energy}` === '3,0,1,0,2' ? true : JSON.stringify(row);
   });
   t('Settlement with harvest: old reserve and new harvest traced apart; the harvest is never spoiled this turn', () => {
-    const { state, rng } = fresh('harv'); state.turn = 1;
+    const { state, rng } = fresh('harv'); state.turn = 1; setInv(state, 'p0', 'food', 7);
     develop(state, 'p0', 31, 'food'); develop(state, 'p0', 2, 'energy');
     const row = SettlementSystem.run(state, rng).rows[0];
     for (const r of ['food', 'energy', 'smithore']) {
@@ -3336,10 +3606,10 @@ function runSelfTests() {
     if (row.produced.food < 1 || row.spoiled.food !== 2) return `food spoilage must only touch the reserve: ${JSON.stringify(row)}`;
     return state.players[0].inventory.food === row.final.food ? audited(state) : 'inventory differs from the report';
   });
-  t('Settlement: odd amounts and zero (PROVISIONAL floor): food 3/5/0, energy 3/4/0', () => {
-    const got = [3, 5, 0].map((f) => { const { state, rng } = fresh(); state.turn = 1; setInv(state, 'p0', 'food', f); return SettlementSystem.run(state, rng).rows[0]; });
-    if (got.map((r) => `${r.spoiled.food}/${r.final.food}`).join() !== '0/1,1/2,0/0') return got.map((r) => `${r.spoiled.food}/${r.final.food}`).join();
-    if (got[2].missingFood !== 2) return 'zero food must leave 2 missing';
+  t('Settlement: odd amounts and zero (PROVISIONAL floor): food left 3/5/0, energy 3/4/0', () => {
+    const got = [6, 8, 0].map((f) => { const { state, rng } = fresh(); state.turn = 1; setInv(state, 'p0', 'food', f); return SettlementSystem.run(state, rng).rows[0]; });
+    if (got.map((r) => `${r.spoiled.food}/${r.final.food}`).join() !== '1/2,2/3,0/0') return got.map((r) => `${r.spoiled.food}/${r.final.food}`).join();
+    if (got[2].missingFood !== 3) return 'zero food must leave 3 missing';
     const en = [3, 4, 0].map((e) => { const { state, rng } = fresh(); state.turn = 1; setInv(state, 'p0', 'energy', e); return SettlementSystem.run(state, rng).rows[0].spoiled.energy; });
     return eq(en.join(), '0,1,0', 'energy spoilage');
   });
@@ -3363,69 +3633,116 @@ function runSelfTests() {
   });
 
   /* ---------- P0.4 food, time and no debt ---------- */
-  t('Hunger: no debt; missing food only cuts next development time (PROVISIONAL 2/3/4 per turn, -25% per unit, 15 s floor)', () => {
+  t('Food need: [Atari code][C64] 3 per turn in rounds 1-4, 4 in 5-8, 5 in 9-12; hunger costs no money', () => {
     const bands = [1, 4, 5, 8, 9, 12].map((n) => ConsumptionSystem.foodNeed(n)).join();
-    if (bands !== '2,2,3,3,4,4') return `bands ${bands}`;
+    if (bands !== '3,3,4,4,5,5') return `bands ${bands}`;
     const { state, rng } = fresh(); state.turn = 5; const p = state.players[0]; setInv(state, 'p0', 'food', 1);
     const cash = p.cash; SettlementSystem.run(state, rng);
-    if (p.shortageFlags.foodMissing !== 2) return `missing ${p.shortageFlags.foodMissing}`;
-    if (p.cash !== cash || 'survivalDebt' in p || 'debt' in ScoringSystem.breakdown(state, p)) return 'hunger must not cost money';
-    if (ConsumptionSystem.humanTimeMs(state, p) !== 30000) return `time ${ConsumptionSystem.humanTimeMs(state, p)}`;
-    p.shortageFlags.foodMissing = 4;
-    return eq(ConsumptionSystem.humanTimeMs(state, p), 15000, 'floor 15 s');
+    if (p.shortageFlags.foodMissing !== 3) return `missing ${p.shortageFlags.foodMissing}`;
+    return p.cash === cash && !('survivalDebt' in p) && !('debt' in ScoringSystem.breakdown(state, p)) ? true : 'hunger must not cost money';
+  });
+  t('Development time: [Atari code][C64] 10 + floor(91 x min(1, food / need)) units of 28 PAL frames (full ~56.4 s), any difficulty; species hook', () => {
+    const units = [[0, 3], [1, 3], [2, 3], [3, 3], [9, 3], [3, 4], [4, 5]].map(([f, n]) => ConsumptionSystem.devUnits(f, n)).join();
+    if (units !== '10,40,70,101,101,78,82') return `units ${units}`;
+    for (const diff of Object.keys(CONFIG.DIFFICULTY)) {
+      const { state } = fresh('time', diff); state.turn = 1; const p = state.players[0];
+      if (ConsumptionSystem.humanTimeMs(state, p) !== 56419) return `${diff}: full food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
+      setInv(state, 'p0', 'food', 1); if (ConsumptionSystem.humanTimeMs(state, p) !== 22344) return `${diff}: 1 food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
+      setInv(state, 'p0', 'food', 0); if (ConsumptionSystem.humanTimeMs(state, p) !== 5586) return `${diff}: no food ${ConsumptionSystem.humanTimeMs(state, p)} ms`;
+    }
+    const { state } = fresh(); state.turn = 1;
+    return eq(ConsumptionSystem.humanTimeMs(state, state.players[0], 9 / 7), 72539, 'species factor 9/7 (Flapper, 36 frames per unit)');
   });
 
   /* ---------- P1.5 store ---------- */
-  t('Store: [manual] starts with 16 food, 16 energy, 0 smithore and 16 RUCs; module costs 25/50/75; plot 500', () => {
+  t('Start: [Atari code][C64] colonists 4 food / 2 energy; store 8 food / 8 energy / 8 smithore, 14 RUCs (cap 14); modules 25/50/75; plot 500', () => {
     const { state } = fresh(); const st = state.store;
-    const got = `${st.stock.food}/${st.stock.energy}/${st.stock.smithore}/${st.ruc}/${Object.values(CONFIG.MODULE_COST).join('-')}/${CONFIG.PLOT_VALUE}`;
-    return eq(got, '16/16/0/16/25-50-75/500', 'store');
+    if (!state.players.every((p) => `${p.inventory.food}/${p.inventory.energy}/${p.inventory.smithore}` === '4/2/0')) return `colonists ${JSON.stringify(state.players.map((p) => p.inventory))}`;
+    const got = `${st.stock.food}/${st.stock.energy}/${st.stock.smithore}/${st.ruc}/${CONFIG.RUC_MAX}/${Object.values(CONFIG.MODULE_COST).join('-')}/${CONFIG.PLOT_VALUE}`;
+    return eq(got, '8/8/8/14/14/25-50-75/500', 'store');
   });
-  t('Store: RUCs only from smithore sold to it (2 each, ready next turn, corral cap 16); no free food/energy restock', () => {
+  t('Store: [Atari code] builds min(14 - corral, floor(smithore / 2)) RUCs between turns, 2 smithore each; no free food/energy restock', () => {
     const { state, rng } = fresh('fab');
     const before = JSON.stringify(state.store);
-    if (StoreSystem.betweenTurns(state).rucsMade || JSON.stringify(state.store) !== before) return 'something appeared from nothing between turns';
-    ResourceLedger.moveItem(state, 'food', 'store', 'nature', 16); if (StoreSystem.betweenTurns(state).rucsMade || state.store.stock.food !== 0) return 'free restock';
-    state.store.ruc = 10; state.rucs.lost = 6; // six RUCs gone for good, so the RUC book-keeping still closes
+    if (StoreSystem.betweenTurns(state).rucsMade || JSON.stringify(state.store) !== before) return 'a full corral (14) must build nothing';
+    ResourceLedger.moveItem(state, 'food', 'store', 'nature', 8); if (StoreSystem.betweenTurns(state).rucsMade || state.store.stock.food !== 0) return 'free restock';
+    state.store.ruc = 10; state.rucs.lost = 4; // four RUCs gone for good, so the RUC book-keeping still closes
     setInv(state, 'p1', 'smithore', 2);
     const e = engineFor(state, rng, 'smithore', ['p1'], true); e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 20);
     for (let i = 0; i < 40 && state.players[1].inventory.smithore > 0; i++) e.update(100);
-    if (state.store.stock.smithore !== 2) return `store smithore ${state.store.stock.smithore}`;
+    if (state.store.stock.smithore !== 10) return `store smithore ${state.store.stock.smithore}`;
     if (state.store.ruc !== 10) return 'a RUC appeared during the same turn';
     const r = StoreSystem.betweenTurns(state);
-    if (r.rucsMade !== 1 || state.store.ruc !== 11 || state.store.stock.smithore !== 0) return `made ${r.rucsMade}, corral ${state.store.ruc}`;
-    state.store.ruc = 16; state.rucs.lost = 1; ResourceLedger.moveItem(state, 'smithore', 'nature', 'store', 4);
-    if (StoreSystem.betweenTurns(state).rucsMade !== 0 || state.store.stock.smithore !== 4) return 'went past the corral cap';
+    if (r.rucsMade !== 4 || state.store.ruc !== 14 || state.store.stock.smithore !== 2) return `made ${r.rucsMade}, corral ${state.store.ruc}, smithore ${state.store.stock.smithore}`;
+    state.store.ruc = 12; state.rucs.lost = 6; ResourceLedger.moveItem(state, 'smithore', 'nature', 'store', 1);
+    const r2 = StoreSystem.betweenTurns(state);
+    if (r2.rucsMade !== 1 || state.store.ruc !== 13 || state.store.stock.smithore !== 1) return `odd smithore: made ${r2.rucsMade}, corral ${state.store.ruc}`;
     return audited(state);
   });
-  t('Store prices (formula PROVISIONAL): always within [manual] minimum 15/10/14 and ceiling 265', () => {
-    if (`${RESOURCE_DEFS.food.minPrice}/${RESOURCE_DEFS.energy.minPrice}/${RESOURCE_DEFS.smithore.minPrice}` !== '15/10/14') return 'minimums';
-    for (const d of enabledResources()) {
-      for (const stock of [0, 1, 5, 16, 24, 50, 1000]) {
-        const c = StoreSystem.centralPrice(d, stock); const a = StoreSystem.ask(d, stock); const b = StoreSystem.bid(d, stock);
-        if (b < d.minPrice || c < d.minPrice || a > CONFIG.STORE_PRICE_MAX || c > CONFIG.STORE_PRICE_MAX || b > a) return `${d.id} stock ${stock}: bid ${b} central ${c} ask ${a}`;
-      }
-    }
-    const { state } = fresh(); if (StoreSystem.rucPrice(state) !== 100) return `full corral RUC ${StoreSystem.rucPrice(state)}`;
-    state.store.ruc = 0; return eq(StoreSystem.rucPrice(state), 200, 'empty corral RUC (PROVISIONAL cap)');
+  t('Store prices: [C64] round 1 store buys/sells smithore 50/85, food 15/50, energy 10/45 ([Atari code] P 50/30/25; P-15/P+20, P/P+35)', () => {
+    const { state } = fresh();
+    const got = ['smithore', 'food', 'energy'].map((id) => `${StoreSystem.price(state, RESOURCE_DEFS[id])}:${StoreSystem.bid(state, RESOURCE_DEFS[id])}/${StoreSystem.ask(state, RESOURCE_DEFS[id])}`).join(' ');
+    if (got !== '50:50/85 30:15/50 25:10/45') return `round 1 ${got}`;
+    const e = engineFor(state, new SeededRNG('r1'), 'food', ['p0'], true);
+    return eq(`${e.entry('store-b').price}/${e.entry('store-s').price}/${e.centralPrice()}`, '15/50/30', 'store lines in the food auction');
   });
-  t('Auction: [manual] with the store out of stock colonists trade above 265; with stock a colonist price stops at 265', () => {
+  t('Store prices: [Atari code] P x (0.25 + 0.75 x demand/supply), ratio in 1/8 steps, supply 0 -> 1, smithore ratio clamped to [0.25, 3]', () => {
+    const f = (P, d, s, c = false) => StoreSystem.supplyDemand(P, d, s, c);
+    const got = [f(100, 12, 12), f(100, 6, 12), f(100, 30, 4), f(100, 30, 4, true), f(40, 5, 0), f(100, 1, 40, true), f(100, 0, 40)].join();
+    return eq(got, '100,62,587,250,160,43,25', 'supplyDemand');
+  });
+  t('Store prices: [Atari code] after an auction with trades P = average traded price; floors food 30 / energy 25 / smithore 20, ceiling 250', () => {
+    const { state } = fresh();
+    StoreSystem.afterAuction(state, 'food', { volume: 0, avg: null }); if (state.storePrice.food !== 30) return 'no trade must keep P';
+    StoreSystem.afterAuction(state, 'food', { volume: 3, avg: 44 }); if (state.storePrice.food !== 44) return `avg -> ${state.storePrice.food}`;
+    if (`${StoreSystem.bid(state, RESOURCE_DEFS.food)}/${StoreSystem.ask(state, RESOURCE_DEFS.food)}` !== '29/64') return 'lines follow P';
+    // Food: end of round 1, need next round 3 -> demand 12; supply = store 8 + sum(max(0, own - 3) / 2) + production (none).
+    state.turn = 1; state.storePrice.food = 30; state.players.forEach((p) => setInv(state, p.id, 'food', 4));
+    StoreSystem.updatePrices(state, new SeededRNG('u1'));
+    if (state.storePrice.food !== 41) return `food scarce: ${state.storePrice.food} (expected floor(30 x 88 / 64) = 41)`;
+    state.storePrice.food = 30; setInv(state, 'p0', 'food', 200); StoreSystem.updatePrices(state, new SeededRNG('u2'));
+    if (state.storePrice.food !== 30) return `food floor: ${state.storePrice.food}`;
+    // Energy: demand = sum(non-energy RUCs) + 4, supply = store + sum(max(0, own - need) x 3/4) + production.
+    const b = fresh(); const s2 = b.state; s2.turn = 1; develop(s2, 'p0', 0, 'food'); develop(s2, 'p0', 2, 'smithore');
+    ResourceLedger.moveItem(s2, 'energy', 'store', 'nature', 8); s2.players.forEach((p) => setInv(s2, p.id, 'energy', 0));
+    StoreSystem.updatePrices(s2, new SeededRNG('u3'));
+    if (s2.storePrice.energy !== 118) return `energy scarce: ${s2.storePrice.energy} (expected floor(25 x 304 / 64) = 118)`;
+    s2.storePrice.energy = 240; StoreSystem.updatePrices(s2, new SeededRNG('u4'));
+    return eq(s2.storePrice.energy, 250, 'ceiling');
+  });
+  t('Store prices: [Atari code] smithore = max(50, supply/demand) + 7 x binomial step (-28..+28), min 20; RUC price = 2 x smithore rounded down to $10', () => {
+    const steps = new Map(); const rng = new SeededRNG('smi');
+    for (let i = 0; i < 600; i++) {
+      const { state } = fresh(); state.turn = 1; StoreSystem.updatePrices(state, rng);
+      const k = (state.storePrice.smithore - 50) / 7;
+      if (!Number.isInteger(k) || Math.abs(k) > 4) return `smithore ${state.storePrice.smithore}`;
+      steps.set(k, (steps.get(k) || 0) + 1);
+    }
+    if (!steps.get(0) || !steps.get(1) || !steps.get(-1)) return `steps ${JSON.stringify([...steps])}`;
+    // Scarce: corral and smithore empty -> supply 0 -> ratio clamped to 3 -> 50 x 160 / 64 = 125, then the random step.
+    const { state } = fresh(); state.turn = 3; state.store.ruc = 0; state.rucs.lost = 14; ResourceLedger.moveItem(state, 'smithore', 'store', 'nature', 8);
+    StoreSystem.updatePrices(state, new SeededRNG('scarce'));
+    if (Math.abs(state.storePrice.smithore - 125) > 28 || (state.storePrice.smithore - 125) % 7) return `scarce smithore ${state.storePrice.smithore}`;
+    const mule = [49, 50, 57, 20, 250].map((P) => { state.storePrice.smithore = P; return StoreSystem.rucPrice(state); }).join();
+    return eq(mule, '90,100,110,40,500', 'RUC price');
+  });
+  t('Auction: [manual] with the store out of stock colonists trade above the store top; with stock a colonist price stops at it (250 + 20)', () => {
     const { state, rng } = fresh(); setInv(state, 'p1', 'food', 3); setCash(state, 'p0', 2000);
-    ResourceLedger.moveItem(state, 'food', 'store', 'nature', 16);
+    ResourceLedger.moveItem(state, 'food', 'store', 'nature', 8);
     const e = engineFor(state, rng, 'food', ['p0', 'p1'], true);
     e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 300); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 300); e.update(600);
     if (e.volume !== 1 || e.trades[0].price !== 300) return `no trade above the store ceiling: ${JSON.stringify(e.trades)}`;
     if (ResourceLedger.audit(state).length) return 'ledger';
     const b = fresh(); const e2 = engineFor(b.state, b.rng, 'food', ['p0', 'p1'], true);
     e2.setRole('p0', ROLE.BUYER); e2.setPrice('p0', 500);
-    return eq(e2.entry('p0').price, 265, 'price with store stock');
+    return eq(e2.entry('p0').price, 270, 'price with store stock');
   });
 
   /* ---------- P1.6 + 6 bis: walking development, return and runaway RUCs ---------- */
   t('Store: returning a RUC refunds 100% of the robot price', () => {
     const { state } = fresh(); const c0 = state.players[0].cash;
     const r = StoreSystem.buyRuc(state, 'p0'); StoreSystem.refundRuc(state, 'p0', r.price);
-    return state.players[0].cash === c0 && state.store.ruc === 16 ? audited(state) : 'refund';
+    return state.players[0].cash === c0 && state.store.ruc === 14 ? audited(state) : 'refund';
   });
   t('Walk: arrows move the colonist (not a cursor); the clock runs while walking and standing still', () => {
     const { state, w } = walkState(); const x0 = w.x; const t0 = w.timeLeft;
@@ -3451,7 +3768,7 @@ function runSelfTests() {
     if (w.log.join() !== 'buy' || !w.carrying || w.x !== doorX || w.y !== doorY) return `log ${w.log}, moved ${w.x !== doorX || w.y !== doorY}`;
     go(state, w, { x: 0, y: 1 }, 500); // keep pushing further at the door
     if (w.log.join() !== 'buy') return 'pushing further re-triggered the visit';
-    return p.cash === c0 - w.carrying.paid && state.store.ruc === 15 ? audited(state, 1) : `cash ${p.cash}`;
+    return p.cash === c0 - w.carrying.paid && state.store.ruc === 13 ? audited(state, 1) : `cash ${p.cash}`;
   });
   t('Walk: outfitting for food, energy or smithore needs walking into that shop, paid once', () => {
     for (const res of ['food', 'energy', 'smithore']) {
@@ -3563,7 +3880,7 @@ function runSelfTests() {
     if (visit(state, w, 'corral').join() !== 'buy') return 'buy';
     if (visit(state, w, 'shop_energy').join() !== 'outfit') return 'outfit';
     if (visit(state, w, 'corral').join() !== 'return') return 'return';
-    if (p.cash !== c0 - CONFIG.MODULE_COST.energy || w.carrying || state.store.ruc !== 16) return `cash ${p.cash}, corral ${state.store.ruc}`;
+    if (p.cash !== c0 - CONFIG.MODULE_COST.energy || w.carrying || state.store.ruc !== 14) return `cash ${p.cash}, corral ${state.store.ruc}`;
     return audited(state);
   });
   t('Walk: [manual] time running out (or ending the turn) while leading a RUC = it runs away; nothing back, never in the corral again', () => {
@@ -3573,7 +3890,7 @@ function runSelfTests() {
       if (how === 'timeout') go(state, w, { x: 0, y: 0 }, 70000);
       else { DevWalk.end(state, w, 'done'); go(state, w, { x: 0, y: 0 }, CONFIG.WALK.fleeShuffleMs + CONFIG.WALK.fleeRunMs + 50); }
       if (w.ended !== how || w.carrying || w.fleeing) return `${how}: still carrying or fleeing (ended ${w.ended})`;
-      if (p.cash !== cash || state.store.ruc !== 15 || state.rucs.lost !== 1) return `${how}: cash ${p.cash} corral ${state.store.ruc} lost ${state.rucs.lost}`;
+      if (p.cash !== cash || state.store.ruc !== 13 || state.rucs.lost !== 1) return `${how}: cash ${p.cash} corral ${state.store.ruc} lost ${state.rucs.lost}`;
       const bad = audited(state); if (bad !== true) return bad;
     }
   });
@@ -3650,7 +3967,7 @@ function runSelfTests() {
     const c0 = state.players[0].cash;
     e.update(499); if (e.volume !== 0) return 'traded before 500 ms';
     e.update(1); if (e.volume !== 1 || e.trades[0].price !== 41) return `midpoint ${e.trades[0] && e.trades[0].price}`;
-    if (state.players[0].cash !== c0 - 41 || state.players[0].inventory.food !== 7) return 'buyer balances';
+    if (state.players[0].cash !== c0 - 41 || state.players[0].inventory.food !== 5) return 'buyer balances';
     return audited(state);
   });
   t('Auction: crossing that breaks resets the 500 ms timer', () => {
@@ -3678,7 +3995,7 @@ function runSelfTests() {
     return eq(e.trades[0] && e.trades[0].buyer, 'p2', 'winner');
   });
   t('Auction: the store sells only real stock and buys colonist surplus', () => {
-    const { state, rng } = fresh(); ResourceLedger.moveItem(state, 'food', 'store', 'nature', 16); setInv(state, 'p0', 'food', 4);
+    const { state, rng } = fresh(); ResourceLedger.moveItem(state, 'food', 'store', 'nature', 8); setInv(state, 'p0', 'food', 4);
     let e = engineFor(state, rng, 'food', ['p0', 'p1'], true);
     e.setRole('p1', ROLE.BUYER); e.setPrice('p1', 120); e.update(600);
     if (e.volume !== 0) return 'the store sold with empty stock';
@@ -3871,18 +4188,18 @@ function runSelfTests() {
   });
 
   /* ---------- P2.9 development order ---------- */
-  t('Development order: [manual] leader first to last; stable tie; last first when fewer than 7 RUCs (6 reverses, 7 does not)', () => {
+  t('Development order: [Atari code] leader first to last; stable tie; last first when the corral has 7 RUCs or fewer (7 reverses, 8 does not)', () => {
     const { state } = fresh(); setCash(state, 'p0', 900); setCash(state, 'p1', 3000); setCash(state, 'p2', 1500); setCash(state, 'p3', 1500);
     const o = DevOrder.create(state);
     if (o.order.join() !== 'p1,p2,p3,p0' || o.reversed) return `normal ${o.order}`;
-    state.store.ruc = 7; if (DevOrder.create(state).reversed) return '7 RUCs must not reverse ([manual] "less than 7")';
-    state.store.ruc = 6; const r = DevOrder.create(state);
+    state.store.ruc = 8; if (DevOrder.create(state).reversed) return '8 RUCs must not reverse';
+    state.store.ruc = 7; const r = DevOrder.create(state);
     return r.reversed && r.order.join() === 'p0,p3,p2,p1' ? true : `reversed ${r.order}`;
   });
   t('Development queue: a purchase changes the corral for the next colonists; the queue survives a JSON save', () => {
     const { state, rng } = fresh('dq'); state.turn = 2;
     [0, 8, 36, 44].forEach((id, i) => LandGrantSystem.assign(state, `p${i}`, id));
-    state.store.ruc = 1; state.rucs.lost = 15;
+    state.store.ruc = 1; state.rucs.lost = 13;
     const q = DevOrder.create(state);
     const first = playerById(state, q.order[0]); const second = playerById(state, q.order[1]);
     if (AISystem.develop(state, rng, first).length !== 1 || state.store.ruc !== 0) return 'the first colonist did not take the last RUC';
@@ -3891,75 +4208,240 @@ function runSelfTests() {
     return back.idx === 2 && back.order.join() === q.order.join() ? audited(state) : 'queue round trip';
   });
 
-  /* ---------- P2.10 events ---------- */
-  t('Individual events: [manual] one independent 25% draw for each colonist turn', () => {
-    const { state, rng } = fresh('ind'); state.turn = 5;
-    const counts = { p0: 0, p1: 0, p2: 0, p3: 0 }; const N = 2000;
+  /* ---------- P2.10 events ([Atari code] events.md; C64 strings c64-strings.txt) ---------- */
+  const ranked = (state, order) => { state.events.rank = order.slice(); return state; };
+  const PERSONAL_Q = [1, 1, -1, 2, -3, 4, -2, -1, 2, 4, 8, 2, 3, 6, 4, 2, -6, -4, -4, -4, -1, 1];
+  t('Personal events: [Atari code][C64] the 22 original events in the original order, weights and humour', () => {
+    if (INDIVIDUAL_EVENT_IDS.length !== 22) return `${INDIVIDUAL_EVENT_IDS.length} personal events`;
+    const q = INDIVIDUAL_EVENT_IDS.map((id) => EVENT_DEFS[id].quality);
+    if (q.join() !== PERSONAL_Q.join()) return `weights ${q.join()}`;
+    if (INDIVIDUAL_EVENT_IDS.some((id) => EVENT_DEFS[id].origin !== 'c64' || EVENT_DEFS[id].scope !== 'individual')) return 'origin/scope';
+    const { state } = fresh('txt'); state.turn = 1;
+    const all = INDIVIDUAL_EVENT_IDS.map((id) => EVENT_DEFS[id].text({ each: 50, total: 100, amount: 50, plot: 3 })).join(' ');
+    const words = ['glac-elfs', 'anguila de pantà', 'rata-ant', 'kazinga', 'cucs berruga', 'cuques-gat', 'llangardaix-ratpenat', 'gitanos espacials', 'Estupidesa Artificial', 'claqué'];
+    const miss = words.filter((w) => !all.includes(w));
+    return miss.length ? `missing ${miss.join(', ')}` : true;
+  });
+  t('Personal events: [Atari code] amount = |weight| x 25 x (floor(round/4) + 1); per-MULE events multiply by the MULE count', () => {
+    const { state } = fresh('amt');
+    for (const [turn, want] of [[1, 200], [3, 200], [4, 400], [7, 400], [8, 600], [11, 600], [12, 800]]) {
+      state.turn = turn; const a = EventSystem.amount(state, 'museum', 'p0');
+      if (a.total !== want) return `museum round ${turn}: ${a.total} != ${want}`;
+    }
+    state.turn = 5; develop(state, 'p0', 36, 'smithore'); develop(state, 'p0', 37, 'smithore'); develop(state, 'p0', 0, 'food');
+    const a = EventSystem.amount(state, 'mining_repair', 'p0');
+    if (a.each !== 100 || a.count !== 2 || a.total !== 200) return `mining ${JSON.stringify(a)}`;
+    const cash = state.players[0].cash; const rec = EventSystem.build(state, new SeededRNG('m'), 'mining_repair', 'p0');
+    if (state.players[0].cash !== cash - 200 || !rec.text.includes('100 cr') || !rec.text.includes('200 cr') || !rec.negative) return `${rec.text} cash ${state.players[0].cash}`;
+    return audited(state);
+  });
+  t('Personal events: [Atari code] 22/80 = 27.5 % per player turn, one draw of its own each turn', () => {
+    const { state, rng } = fresh('ind'); state.turn = 5; ranked(state, ['p1', 'p0', 'p2', 'p3']);
+    let hits = 0; const N = 4000;
     for (let i = 0; i < N; i++) {
-      for (const p of state.players) {
-        const before = rng.getState(); const rec = EventSystem.rollIndividual(GameState.clone(state), rng, p.id);
-        if (rng.getState() === before) return 'a colonist got no draw of its own';
-        if (rec) counts[p.id]++;
-      }
+      const before = rng.getState(); if (EventSystem.rollIndividual(GameState.clone(state), rng, 'p0')) hits++;
+      if (rng.getState() === before) return 'no draw';
     }
-    return Object.values(counts).every((c) => Math.abs(c / N - 0.25) < 0.04) ? true : JSON.stringify(counts);
+    return Math.abs(hits / N - 0.275) < 0.025 ? true : `rate ${hits / N}`;
   });
-  t('Individual events: [manual] leader never gets a good one, last never a bad one (from turn 1); editing net worth moves the rule', () => {
-    for (const turn of [1, 6]) {
-      const { state, rng } = fresh(`lead${turn}`); state.turn = turn; setCash(state, 'p1', 5000); setCash(state, 'p2', 100);
-      for (let i = 0; i < 400; i++) {
-        let rec = EventSystem.rollIndividual(GameState.clone(state), rng, 'p1'); if (rec && !rec.negative) return `turn ${turn}: the leader got lucky`;
-        rec = EventSystem.rollIndividual(GameState.clone(state), rng, 'p2'); if (rec && rec.negative) return `turn ${turn}: the last got bad luck`;
-      }
-      setCash(state, 'p1', 50);
-      const st = EventSystem.standing(state);
-      if (st.last.join() !== 'p1' || st.leaders.includes('p1')) return `after the edit ${JSON.stringify(st)}`;
-      if (turn === 6 && !EventSystem.canHit(state, 'medical_bill', 'p2')) return 'p2 is no longer last: bad events must be possible';
+  t('Personal events: [Atari code] 1st place never good, the LAST TWO never bad, 2nd place gets both', () => {
+    const { state, rng } = fresh('lead'); state.turn = 6; ranked(state, ['p1', 'p0', 'p2', 'p3']);
+    const seen = { good: 0, bad: 0 };
+    for (let i = 0; i < 600; i++) {
+      let rec = EventSystem.rollIndividual(GameState.clone(state), rng, 'p1'); if (rec && !rec.negative) return 'the leader got lucky';
+      for (const pid of ['p2', 'p3']) { rec = EventSystem.rollIndividual(GameState.clone(state), rng, pid); if (rec && rec.negative) return `${pid} (bottom two) got bad luck`; }
+      rec = EventSystem.rollIndividual(GameState.clone(state), rng, 'p0'); if (rec) seen[rec.negative ? 'bad' : 'good']++;
     }
+    return seen.good && seen.bad ? true : `2nd place ${JSON.stringify(seen)}`;
   });
-  t('Planetary events: each applied once, fully accounted (ledger and RUCs), card text = numbers applied', () => {
-    for (const id of PLANET_EVENT_IDS) {
-      const { state, rng } = fresh(`pl-${id}`); state.turn = 5;
-      develop(state, 'p0', 0, 'food'); develop(state, 'p1', 8, 'energy'); develop(state, 'p2', 36, 'smithore');
-      setInv(state, 'p1', 'smithore', 7); setInv(state, 'p1', 'crystite', 5);
-      const rec = EventSystem.build(state, rng, id, null); const m = state.modifiers;
-      const bad = audited(state); if (bad !== true) return `${id}: ${bad}`;
-      const ok = {
-        pest_attack: m.zeroPlots.length === 1 && m.zeroPlots[0].reason === 'pest' && state.plots[m.zeroPlots[0].plotId].ruc.module === 'food',
-        acid_rain: m.foodPct === 135 && m.energyPct === 70 && rec.text.includes('+35%') && rec.text.includes('-30%'),
-        solar_activity: m.energyPct === 130 && rec.text.includes('+30%'),
-        planetquake: m.smithorePct === 75 && rec.text.includes('-25%'),
-        radiation: state.plots.filter((p) => p.ruc).length === 2 && state.rucs.lost === 1,
-        store_fire: enabledResources().every((d) => state.store.stock[d.id] === 0) && rec.text.includes('menjar 16'),
-        pirates: state.players.every((p) => p.inventory.smithore === 0) && state.players[1].inventory.crystite === 5 && rec.params.amount === 7 && rec.text.includes('7 unitats')
-      }[id];
-      if (!ok) return `${id}: ${rec.text} ${JSON.stringify(m)}`;
+  t('Personal events: [Atari code] each once per game; the search goes down (wrapping) at most 20 candidates', () => {
+    const { state, rng } = fresh('once'); state.turn = 2; ranked(state, ['p1', 'p0', 'p2', 'p3']);
+    state.events.used = state.events.used.map((v, i) => (i === 9 ? 0 : 1));
+    const s = (start) => EventSystem.search(state, start, 'p0');
+    if (s(9) !== 9 || s(10) !== 9 || s(11) !== 9) return 'did not find #09 going down';
+    if (s(8) !== null || s(7) !== null) return 'searched past 20 candidates';
+    let got = 0;
+    for (let i = 0; i < 400; i++) { const c = GameState.clone(state); const rec = EventSystem.rollIndividual(c, rng, 'p0'); if (rec) { got++; if (rec.id !== 'wart_worm' || c.events.used[9] !== 1) return `${rec.id} used ${c.events.used[9]}`; } }
+    if (!got) return 'never found';
+    state.events.used[9] = 1;
+    for (let i = 0; i < 400; i++) if (EventSystem.rollIndividual(GameState.clone(state), rng, 'p0')) return 'an event happened twice';
+    return SaveSystem.deserialize(SaveSystem.serialize(state, rng)).state.events.used.join() === state.events.used.join() ? true : 'used flags not saved';
+  });
+  t('Personal events: [Atari code] a non-leader with 0 food gets the package instead (even if already used); the leader does not', () => {
+    const { state, rng } = fresh('starve'); state.turn = 3; ranked(state, ['p1', 'p0', 'p2', 'p3']);
+    setInv(state, 'p0', 'food', 0); setInv(state, 'p1', 'food', 0); state.events.used[0] = 1;
+    let got = 0;
+    for (let i = 0; i < 300; i++) {
+      const c = GameState.clone(state); const rec = EventSystem.rollIndividual(c, rng, 'p0');
+      if (rec) { got++; if (rec.id !== 'package' || c.players[0].inventory.food !== 3 || c.players[0].inventory.energy !== state.players[0].inventory.energy + 2) return `${rec.id} food ${c.players[0].inventory.food}`; }
+      const l = EventSystem.rollIndividual(GameState.clone(state), rng, 'p1'); if (l && l.id === 'package') return 'the leader got the package';
     }
+    return got ? true : 'no package';
   });
-  t('Events: the card text carries the applied numbers (medical bill capped by cash)', () => {
-    const { state, rng } = fresh('ev2'); setCash(state, 'p1', 30);
-    const rec = EventSystem.build(state, rng, 'medical_bill', 'p1');
-    return rec.text.includes('-30 cr') && state.players[1].cash === 0 ? audited(state) : rec.text;
+  t('Personal events: [Atari code] an unaffordable penalty is cancelled silently (not marked used); cash-bound ones are skipped', () => {
+    const { state, rng } = fresh('broke'); state.turn = 2; ranked(state, ['p1', 'p0', 'p2', 'p3']);
+    develop(state, 'p0', 0, 'food'); setCash(state, 'p0', 0);
+    state.events.used = state.events.used.map((v, i) => (i === 4 ? 0 : 1));
+    for (let i = 0; i < 300; i++) { const c = GameState.clone(state); if (EventSystem.rollIndividual(c, rng, 'p0') || c.events.used[4] || c.players[0].cash) return 'lost bolt charged without cash'; }
+    if (EventSystem.precondition(state, 'gypsy_inlaws', 'p0')) return 'gypsy in-laws need the cash';
+    setCash(state, 'p0', 2000);
+    if (!EventSystem.precondition(state, 'gypsy_inlaws', 'p0')) return 'cash 2000 must allow it';
+    let got = null; for (let i = 0; i < 300 && !got; i++) got = EventSystem.rollIndividual(state, rng, 'p0');
+    return got && got.id === 'lost_bolt' && state.players[0].cash === 2000 - 75 ? audited(state) : `got ${got && got.id} cash ${state.players[0].cash}`;
+  });
+  t('Personal events: [Atari code] lost plot = owned plot with the highest index (with its MULE, needs a MULE); extra plot = random free plot', () => {
+    const { state, rng } = fresh('plots'); state.turn = 4;
+    LandGrantSystem.assign(state, 'p0', 3); LandGrantSystem.assign(state, 'p0', 40);
+    if (EventSystem.precondition(state, 'lost_plot', 'p0')) return 'lost plot without any MULE';
+    develop(state, 'p0', 20, 'food'); state.plots[40].ruc = { module: 'energy', paid: 100 }; state.store.ruc -= 1;
+    if (!EventSystem.precondition(state, 'lost_plot', 'p0')) return 'precondition';
+    const lost = state.rucs.lost; EventSystem.build(state, rng, 'lost_plot', 'p0');
+    if (state.plots[40].ownerId || state.plots[40].ruc || state.players[0].plots.includes(40) || state.rucs.lost !== lost + 1) return 'plot 40 not lost with its MULE';
+    if (state.plots[20].ownerId !== 'p0' || state.plots[3].ownerId !== 'p0') return 'lost the wrong plot';
+    const free = LandGrantSystem.freePlots(state).length; const rec = EventSystem.build(state, rng, 'extra_plot', 'p0');
+    const got = state.plots[rec.params.plot - 1];
+    if (LandGrantSystem.freePlots(state).length !== free - 1 || got.ownerId !== 'p0' || !state.players[0].plots.includes(got.id)) return 'extra plot';
+    return audited(state);
+  });
+  t('Planetary events: [Atari code] bag 3/2/3/3/3/2/2/2 drawn without replacement, one per round 1-11', () => {
+    const { state } = fresh('bag');
+    const init = { pest_attack: 3, pirates: 2, acid_rain: 3, planetquake: 3, sunspot: 3, meteorite: 2, radiation: 2, store_fire: 2 };
+    if (JSON.stringify(state.events.bag) !== JSON.stringify(init) || PLANET_EVENT_IDS.join() !== Object.keys(init).join()) return JSON.stringify(state.events.bag);
+    const rng = new SeededRNG('bag'); const first = {}; const N = 3000;
+    for (let g = 0; g < N; g++) {
+      const s = GameState.clone(state); const got = {};
+      for (let r = 0; r < 11; r++) { const id = EventSystem.drawPlanet(s, rng); got[id] = (got[id] || 0) + 1; if (!r) first[id] = (first[id] || 0) + 1; }
+      if (Object.entries(got).some(([id, n]) => n > init[id])) return `game ${g}: ${JSON.stringify(got)}`;
+      if (Object.values(s.events.bag).reduce((a, b) => a + b, 0) !== 9) return 'tickets left';
+    }
+    const off = PLANET_EVENT_IDS.find((id) => Math.abs((first[id] || 0) / N - init[id] / 20) > 0.03);
+    return off ? `first draw ${off}: ${first[off] / N}` : true;
+  });
+  t('Planetary events: [Atari code] sunspot +3 energy (cap 8); quake halves mining; acid rain row food +4 / energy -2, others +1 / -1 (0..8)', () => {
+    const { state } = fresh(); const m = state.modifiers;
+    const en = lone(1, 0, 2, TERRAIN.PLAIN, 'energy'); const fo = lone(2, 1, 2, TERRAIN.PLAIN, 'food'); const sm = lone(3, 2, 0, TERRAIN.MOUNTAIN, 'smithore', 2);
+    state.plots = [en, fo, sm];
+    m.sunspot = true;
+    if (ProductionSystem.applyEvents(state, en, 3) !== 6 || ProductionSystem.applyEvents(state, en, 7) !== 8 || ProductionSystem.applyEvents(state, fo, 3) !== 3) return 'sunspot';
+    Object.assign(m, GameState.freshModifiers()); m.quake = true;
+    if (ProductionSystem.applyEvents(state, sm, 5) !== 2 || ProductionSystem.applyEvents(state, fo, 5) !== 5) return 'quake';
+    Object.assign(m, GameState.freshModifiers()); m.acidRow = 2;
+    if (ProductionSystem.applyEvents(state, fo, 2) !== 6 || ProductionSystem.applyEvents(state, en, 3) !== 1 || ProductionSystem.applyEvents(state, fo, 6) !== 8 || ProductionSystem.applyEvents(state, en, 1) !== 0) return 'acid row';
+    m.acidRow = 0;
+    if (ProductionSystem.applyEvents(state, fo, 2) !== 3 || ProductionSystem.applyEvents(state, en, 3) !== 2 || ProductionSystem.applyEvents(state, en, 0) !== 0 || ProductionSystem.applyEvents(state, sm, 4) !== 4) return 'acid other rows';
+  });
+  t('Planetary events: [Atari code] pest (after production) eats all the food of one plot of the 1st or 2nd place', () => {
+    const { state, rng } = fresh('pest'); state.turn = 3; ranked(state, ['p1', 'p2', 'p0', 'p3']);
+    develop(state, 'p0', 31, 'food'); develop(state, 'p1', 40, 'food'); develop(state, 'p3', 13, 'food');
+    state.players.forEach((p) => setInv(state, p.id, 'energy', 3));
+    const st = SettlementSystem.run(state, rng);
+    const row = st.rows.find((r) => r.playerId === 'p1'); const it = row.items.find((x) => x.plotId === 40);
+    if (!it.amount) return 'test setup: plot 40 produced nothing';
+    const food = state.players[1].inventory.food; const n = it.amount;
+    const rec = EventSystem.build(state, rng, 'pest_attack', null);
+    if (!rec || rec.targetId !== 'p1' || state.players[1].inventory.food !== food - n || it.amount !== 0 || it.zeroed !== 'pest') return `pest ${rec && rec.text}`;
+    if (row.produced.food !== 0 || row.final.food !== state.players[1].inventory.food) return 'settlement row not updated';
+    const bad = audited(state); if (bad !== true) return bad;
+    ranked(state, ['p2', 'p1', 'p0', 'p3']);
+    return EventSystem.build(state, rng, 'pest_attack', null) === null ? true : 'pest found a plot without production';
+  });
+  t('Planetary events: [Atari code] pirates take ALL smithore (players and store); fire empties the store only', () => {
+    const { state, rng } = fresh('pir'); state.turn = 5; setInv(state, 'p1', 'smithore', 7); setInv(state, 'p3', 'smithore', 2);
+    const rec = EventSystem.build(state, rng, 'pirates', null);
+    if (state.players.some((p) => p.inventory.smithore) || state.store.stock.smithore !== 0 || rec.params.amount !== 9 + 8) return `pirates ${rec.params.amount}`;
+    const { state: s2 } = fresh('fire'); setInv(s2, 'p0', 'food', 5);
+    EventSystem.build(s2, rng, 'store_fire', null);
+    if (['food', 'energy', 'smithore'].some((r) => s2.store.stock[r] !== 0) || s2.players[0].inventory.food !== 5) return 'fire';
+    const b = audited(state); return b === true ? audited(s2) : b;
+  });
+  t('Planetary events: [Atari code] radiation takes a MULE of the 1st/2nd place; meteorite hits a non-town non-river plot', () => {
+    const { state, rng } = fresh('rad'); state.turn = 4; ranked(state, ['p2', 'p0', 'p1', 'p3']);
+    develop(state, 'p1', 0, 'food'); develop(state, 'p3', 8, 'food');
+    if (EventSystem.build(state, rng, 'radiation', null) !== null) return 'radiation hit the 3rd/4th place';
+    develop(state, 'p0', 36, 'smithore');
+    const rec = EventSystem.build(state, rng, 'radiation', null);
+    if (!rec || state.plots[36].ruc || !state.plots[0].ruc || !state.plots[8].ruc || state.rucs.lost !== 1) return 'radiation';
+    for (let i = 0; i < 60; i++) {
+      const { state: s, rng: r } = fresh(`met${i}`); develop(s, 'p0', 0, 'food');
+      const m = EventSystem.build(s, r, 'meteorite', null); const p = s.plots[m.params.plot - 1];
+      if (p.terrain === TERRAIN.TOWN || p.terrain === TERRAIN.RIVER || p.hiddenDeposit !== 4 || p.ruc) return `meteorite on ${p.id}`;
+      if (p.id === 0 && s.rucs.lost !== 1) return 'MULE not destroyed';
+      const b = audited(s); if (b !== true) return b;
+    }
+    return audited(state);
+  });
+  t('Planetary events: [Atari code] planetquake: half mining always; the slide moves a mountain level and destroys both MULEs', () => {
+    let slid = 0;
+    for (let i = 0; i < 40; i++) {
+      const { state, rng } = fresh(`quake${i}`);
+      const before = state.plots.map((p) => `${p.terrain}${p.richness}`); setCash(state, 'p0', 100000);
+      state.plots.forEach((p) => { if (p.terrain !== TERRAIN.TOWN && !p.ruc && state.store.ruc > 0) develop(state, 'p0', p.id, 'energy'); });
+      const rec = EventSystem.build(state, rng, 'planetquake', null);
+      if (!state.modifiers.quake) return 'no halving';
+      const changed = state.plots.filter((p, k) => `${p.terrain}${p.richness}` !== before[k]);
+      if (!rec.params.slide) { if (changed.length) return 'terrain changed without a slide'; continue; }
+      slid++;
+      const { from, to } = rec.params.slide; const a = state.plots[from]; const b = state.plots[to];
+      if (Math.abs(a.x - b.x) !== 1 || a.y !== b.y || changed.length !== 2 || b.terrain !== TERRAIN.MOUNTAIN) return `slide ${JSON.stringify(rec.params.slide)}`;
+      if ((a.terrain === TERRAIN.MOUNTAIN ? a.richness : 0) !== Number(before[from].slice(-1)) - 1) return 'source did not lose a level';
+      if (a.ruc || b.ruc) return 'MULEs survived the slide';
+      const bad = audited(state); if (bad !== true) return bad;
+    }
+    return slid > 5 && slid < 35 ? true : `slides ${slid}/40 (expected about half)`;
+  });
+  t('Planetary phases: before-events act before PRODUCTION, after-events after it; round 12 = "La nau ha tornat!" with no draw', () => {
+    const g = mkGame(); g.newGame({ seed: 'phases' }); const s = g.state; s.turn = 3; s.event = { items: [] };
+    g.debugForced = ['store_fire']; g.turns.enter(g, 'PLANET_EVENT');
+    if (s.events.after !== 'store_fire' || s.store.stock.food !== 8) return 'the fire struck before production';
+    g.turns.enter(g, 'PLANET_EVENT_AFTER');
+    if (s.events.after !== null || s.store.stock.food !== 0 || !g.turns.phaseData.items.length) return 'the fire did not strike after production';
+    const ids = g.turns.phases.map((p) => p.id);
+    if (!(ids.indexOf('PLANET_EVENT') < ids.indexOf('PRODUCTION') && ids.indexOf('PRODUCTION') < ids.indexOf('PLANET_EVENT_AFTER'))) return ids.join();
+    g.debugForced = ['sunspot']; g.turns.enter(g, 'PLANET_EVENT');
+    if (!s.modifiers.sunspot || s.events.after) return 'sunspot must act before production';
+    const bag = JSON.stringify(s.events.bag); s.turn = CONFIG.TURNS; g.turns.enter(g, 'PLANET_EVENT');
+    const it = g.turns.phaseData.items[0];
+    if (!it || it.id !== 'ship_back' || it.name !== 'La nau ha tornat!' || JSON.stringify(s.events.bag) !== bag) return 'round 12';
+    s.turn = 4; g.turns.enter(g, 'PLANET_EVENT');
+    return Object.values(s.events.bag).reduce((a, b) => a + b, 0) === Object.values(JSON.parse(bag)).reduce((a, b) => a + b, 0) - 1 ? true : 'no ticket drawn in round 4';
   });
   t('Debug: a forced event applies only itself; events and their cards survive a JSON save', () => {
     const g = mkGame(); g.newGame({ seed: 'dbg' });
-    g.debugEventIdx = Object.keys(EVENT_DEFS).indexOf('salvage') - 1;
+    g.debugEventIdx = Object.keys(EVENT_DEFS).indexOf('museum') - 1;
+    const want = EventSystem.amount(g.state, 'museum', 'p0').total;
     const before = GameState.clone(g.state); g.debugEvent(); const after = GameState.clone(g.state);
-    if (after.players[0].cash !== before.players[0].cash + EVENT_DEFS.salvage.amount) return `salvage not applied: ${g.debugLog}`;
+    if (after.players[0].cash !== before.players[0].cash + want) return `museum not applied: ${g.debugLog}`;
     if (JSON.stringify(after.event) !== JSON.stringify(GameState.clone(after).event)) return 'event record not serialisable';
     after.players[0].cash = before.players[0].cash; after.players[0].eventLog = before.players[0].eventLog; after.ext.cash = before.ext.cash; after.event = before.event;
     return JSON.stringify(after) === JSON.stringify(before) ? true : 'the forced event changed something else';
   });
 
   /* ---------- P2.11 scoring ---------- */
-  t('Net worth: [manual] cash + goods at the latest auction price + 500 per plot; RUC = robot (PROVISIONAL 0) + module cost; no debt', () => {
+  t('Net worth: [Atari code] cash + goods at the store price P + 500 per plot + outfit cost + 35 per installed RUC; no debt', () => {
     const { state } = fresh(); const p = state.players[0];
     setCash(state, 'p0', 500); setInv(state, 'p0', 'food', 2); setInv(state, 'p0', 'energy', 0); setInv(state, 'p0', 'smithore', 1);
-    state.lastAvg = { food: 40 };
+    state.storePrice.food = 40;
     LandGrantSystem.assign(state, 'p0', 0); LandGrantSystem.assign(state, 'p0', 1); state.plots[0].ruc = { module: 'smithore', paid: 100 };
     const b = ScoringSystem.breakdown(state, p);
-    // 500 + 2*40 + 1*50 (base price: no smithore auction yet) + 2*500 + 0 (robot) + 75 (module)
-    return b.total === 1705 && b.plots === 1000 && b.modules === 75 && b.rucs === 0 && !('debt' in b) ? true : JSON.stringify(b);
+    // 500 + 2*40 + 1*50 (smithore P) + 2*500 + 35 (robot) + 75 (module)
+    return b.total === 1740 && b.plots === 1000 && b.modules === 75 && b.rucs === 35 && !('debt' in b) ? true : JSON.stringify(b);
+  });
+  t('Colony failure: [Atari code] no food (energy) RUC and no food (energy) anywhere ends the game at once with "total lack of"', () => {
+    const { state } = fresh();
+    if (ScoringSystem.colonyFailure(state) !== null) return 'a fresh colony failed';
+    state.players.forEach((p) => setInv(state, p.id, 'food', 0));
+    if (ScoringSystem.colonyFailure(state) !== null) return 'the store still has food';
+    ResourceLedger.moveItem(state, 'food', 'store', 'nature', 8);
+    if (ScoringSystem.colonyFailure(state) !== 'food') return `no food at all -> ${ScoringSystem.colonyFailure(state)}`;
+    develop(state, 'p1', 0, 'food'); if (ScoringSystem.colonyFailure(state) !== null) return 'a food RUC keeps the colony alive';
+    state.players.forEach((p) => setInv(state, p.id, 'energy', 0)); ResourceLedger.moveItem(state, 'energy', 'store', 'nature', 8);
+    if (ScoringSystem.colonyFailure(state) !== 'energy') return `no energy at all -> ${ScoringSystem.colonyFailure(state)}`;
+    const g = mkGame(); g.newGame({ seed: 'lack' }); g.state.turn = 3;
+    g.state.players.forEach((p) => setInv(g.state, p.id, 'food', 0)); ResourceLedger.moveItem(g.state, 'food', 'store', 'nature', 8);
+    g.turns.enter(g, 'NEXT');
+    const f = g.state.final;
+    if (g.state.phase !== 'GAME_OVER' || !f || f.survives || f.winnerId !== null || f.lack !== 'food') return `final ${JSON.stringify(f)}`;
+    return GameOverScreen.lackText(f.lack) === 'La colònia ha fracassat per una manca total de menjar!' ? true : GameOverScreen.lackText(f.lack);
   });
   t('Colony result: [manual] 60,000 combined — 59,999 fails, 60,000 succeeds even with one rich colonist; no First Founder on failure', () => {
     const { state } = fresh();
@@ -3977,26 +4459,33 @@ function runSelfTests() {
   });
 
   /* ---------- saves, conservation, determinism, engine ---------- */
-  t('Save: schema 2 round trip keeps state and PRNG; schema 1 (old rules) and corrupt saves are refused with a reason', () => {
+  t('Save: schema 4 round trip keeps state (store prices, event bag and used flags) and PRNG; schemas 1-3 (old rules) and corrupt saves are refused', () => {
+    if (CONFIG.SCHEMA_VERSION !== 4) return `schema ${CONFIG.SCHEMA_VERSION}`;
     const { state, rng } = fresh('save'); rng.next(); rng.next();
-    state.turn = 4; state.phase = 'DEVELOPMENT'; state.lastAvg.food = 33;
+    state.turn = 4; state.phase = 'DEVELOPMENT'; state.storePrice.food = 33; state.events.bag.pirates = 1; state.events.used[13] = 1;
     const text = SaveSystem.serialize(state, rng);
     const back = SaveSystem.deserialize(text);
     if (back.incompatible) return 'incompatible';
     const rng2 = new SeededRNG('x'); rng2.setState(back.state.rngState);
     if (JSON.stringify(back.state) !== text) return 'state differs after round trip';
     if (rng2.next() !== rng.next()) return 'rng stream differs';
-    const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: 1, turn: 3 }));
-    if (!old.incompatible || old.reason !== 'old_rules') return `schema 1: ${JSON.stringify(old)}`;
+    if (back.state.storePrice.food !== 33) return 'store price lost';
+    if (back.state.events.bag.pirates !== 1 || back.state.events.used[13] !== 1) return 'event bag / used flags lost';
+    for (const v of [1, 2, 3]) {
+      const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: v, turn: 3 }));
+      if (!old.incompatible || old.reason !== 'old_rules') return `schema ${v}: ${JSON.stringify(old)}`;
+    }
     const bad = SaveSystem.deserialize('{oops');
     return bad.incompatible && bad.reason === 'corrupt' ? true : 'corrupt save accepted';
   });
   t('Conservation: settlement + events + store keep every credit, item and RUC accounted', () => {
     const { state, rng } = fresh('audit'); state.turn = 3;
     [0, 2, 6, 8, 36, 44].forEach((id, i) => develop(state, `p${i % 4}`, id, ['food', 'energy', 'smithore'][i % 3]));
-    ['salvage', 'medical_bill', 'rich_vein'].forEach((id, i) => EventSystem.build(state, rng, id, `p${i + 1}`));
-    EventSystem.build(state, rng, 'radiation', null);
-    SettlementSystem.run(state, rng); StoreSystem.betweenTurns(state);
+    ['museum', 'bat_lizard', 'traveler', 'glac_elves', 'package', 'lost_plot', 'extra_plot', 'solar_dirty'].forEach((id, i) => EventSystem.build(state, rng, id, `p${i % 4}`));
+    ['radiation', 'meteorite', 'planetquake'].forEach((id) => EventSystem.build(state, rng, id, null));
+    SettlementSystem.run(state, rng);
+    ['pest_attack', 'pirates', 'store_fire'].forEach((id) => EventSystem.build(state, rng, id, null));
+    StoreSystem.betweenTurns(state);
     return audited(state);
   });
   t('Determinism: same seed + same actions -> same result', () => {
@@ -4006,8 +4495,9 @@ function runSelfTests() {
       const land = LandRace.create(state, rng, state.players.map((p) => p.id));
       raceRun(state, rng, land, 60000);
       state.players.forEach((p) => AISystem.develop(state, rng, p));
+      EventSystem.rankPlayers(state, rng);
       state.players.forEach((p) => EventSystem.rollIndividual(state, rng, p.id));
-      EventSystem.rollPlanet(state, rng); SettlementSystem.run(state, rng);
+      EventSystem.build(state, rng, EventSystem.drawPlanet(state, rng), null); SettlementSystem.run(state, rng);
       return JSON.stringify(state) + rng.getState();
     };
     return eq(run(), run(), 'runs');
