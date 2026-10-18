@@ -64,3 +64,25 @@ Precedence: C64 emulator observation > disassembly code > manual > secondary. Re
 24. Walking: town 1.33 px/frame, map 0.667 h / 0.333 v px/frame on a 32-px-ish plot (scale to our TILE); terrain slowdown
     6/14/21 frames per step (plain/river/mountain).
 25. End screen: colony rating round((total − 10000)/20000) with the 7 original texts; First Founder only if ≥ $60,000.
+
+## Status (2026-10-18)
+
+Batches 1–5 done (commits 3239df5, 1510a95 refactor, cd14ad9, 5508b1d).
+
+### Batch 6 — sound
+26. Integrate the original-composition chiptune module (`docs/research/audio.md`): music only where the original had it
+    (title, status screens, end); effects everywhere else. UI polish of truncated labels.
+
+### Batch 7 — Mountain Wampus (Standard and Beginner)
+27. Wampus per mechanics.md §9: reward 100 × (floor(round/4) + 1), appearance/hiding rules, once per turn, never while leading
+    a RUC; computers never catch it.
+
+### Batch 8 — Tournament level
+28. Crystite (production, hidden deposits, auction between smithore and food, price rules), assay office (soil samples),
+    collusion in auctions, Tournament pirates steal crystite, meteorite crystite text, Tournament timings.
+
+### Batch 9 — players
+29. 1–4 human players on one machine (key mappings per player for land grant and simultaneous auctions), computer demo mode.
+
+### Batch 10 — QA
+30. Full playtests in the browser at each level, fix what is found, push and verify the live deploy.
