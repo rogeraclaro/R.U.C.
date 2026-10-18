@@ -23,12 +23,22 @@ class Game {
     const d = { sound: true, reduceMotion: false };
     try { return Object.assign(d, JSON.parse(localStorage.getItem('ruc-settings') || '{}')); } catch (e) { return d; }
   }
-  saveSettings() { try { localStorage.setItem('ruc-settings', JSON.stringify(this.settings)); } catch (e) { /* ignore */ } }
+  saveSettings() { if (!this.persist) return; try { localStorage.setItem('ruc-settings', JSON.stringify(this.settings)); } catch (e) { /* ignore */ } }
   /** Seeds are only generated here, outside game logic, so Math.random never touches a deterministic run. */
   randomSeed() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
   announce(text) { const el = document.getElementById('sr'); if (el) el.textContent = text; }
   fast(ms) { return this.autopilot ? Math.min(ms, 120) : ms; }
-  toggleSound() { this.settings.sound = !this.settings.sound; this.saveSettings(); }
+  toggleSound() { this.settings.sound = !this.settings.sound; this.saveSettings(); this.audio.soundChanged(); }
+  /** Called every frame: asks the audio for the music of the current screen (AudioManager.trackFor) and holds it while paused. */
+  syncMusic() {
+    const s = this.state; const pd = this.turns.phaseData;
+    const track = AudioManager.trackFor({
+      mode: this.mode, phase: this.turns.phase, gameOver: this.mode === 'play' && this.screen === this.screens.gameover,
+      survives: !!(s && s.final && s.final.survives), card: !!(pd && pd.items && pd.items.length)
+    });
+    if (track !== this.musicTrack) { this.musicTrack = track; if (track) this.audio.music(track); else this.audio.stopMusic(); }
+    this.audio.hold(this.mode === 'play' && (this.paused || this.helpOpen));
+  }
   toggleReduceMotion() { this.settings.reduceMotion = !this.settings.reduceMotion; this.saveSettings(); }
   toggleHelp() { this.helpOpen = !this.helpOpen; }
   togglePause() { if (this.mode === 'play') this.paused = !this.paused; }
@@ -119,6 +129,7 @@ class Game {
     const founder = !lack && s.turn >= lastRound(s) && rating >= CONFIG.RATING.founderMin;
     s.final = { survives: surv.survives && !lack, rating, combined: surv.combined, winnerId: founder ? rank[0].p.id : null, lack, rank: rank.map((x) => ({ id: x.p.id, b: x.b })) };
     s.phase = 'GAME_OVER'; this.turns.phase = null; this.setScreen('gameover'); this.save();
+    this.audio.play('ship_leave');
   }
 
   /* ---- loop ---- */
@@ -128,7 +139,7 @@ class Game {
       if (this.lastTs === null) this.lastTs = ts;
       const raw = ts - this.lastTs; this.lastTs = ts;
       if (raw > 0) this.fps = Math.round(this.fps * 0.9 + (1000 / raw) * 0.1);
-      this.tick(raw); this.render();
+      this.tick(raw); this.syncMusic(); this.render();
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -202,8 +213,8 @@ class Game {
       const slot = this.devSlot(); if (!slot) return '';
       const w = this.humanWalk();
       if (w) {
-        if (w.marking && !w.carrying) return w.markPlot === null ? 'Oficina de terres: prem Acció sobre una parcel·la teva per marcar-la i torna a l\'oficina.' : `Parcel·la #${w.markPlot + 1} marcada: torna a l'oficina de terres per posar-la a la venda.`;
-        if (!w.carrying) return w.area === 'town' ? 'Compra un RUC al corral, o ves al pub a acabar el torn.' : 'Torna al poble per un RUC, o retira\'n un de la casa d\'una parcel·la teva.';
+        if (w.marking && !w.carrying) return w.markPlot === null ? 'Marca una parcel·la teva amb Acció i torna a l\'oficina de terres.' : `Parcel·la #${w.markPlot + 1} marcada: torna a l'oficina de terres per vendre-la.`;
+        if (!w.carrying) return w.area === 'town' ? 'Compra un RUC al corral, o ves al pub a acabar el torn.' : 'Torna al poble per un RUC, o retira\'n un d\'una parcel·la teva.';
         if (!w.carrying.module) return w.area === 'town' ? 'Entra a un taller per equipar el RUC.' : 'Torna al poble: el RUC s\'ha d\'equipar a un taller.';
         return w.area === 'town' ? 'Surt del poble i porta el RUC a la casa d\'una parcel·la teva.' : 'Posa\'t sobre la casa d\'una parcel·la teva i prem Acció.';
       }
@@ -231,11 +242,25 @@ class Game {
   devStart() {
     const s = this.devSlot(); if (!s || s.stage !== 'ready' || this.paused || this.helpOpen) return;
     s.stage = 'walk'; s.walk = DevWalk.create(this.state, s.pid, ConsumptionSystem.humanTimeMs(this.state, playerById(this.state, s.pid)));
+    this.audio.play('turn_start');
   }
   devFeedback(w) {
     const kind = w.log[w.log.length - 1];
-    this.audio.play(w.bad ? 'error' : kind === 'install' ? 'phase' : 'click');
+    const fx = { buy: 'ruc_bray', outfit: 'outfit', install: 'install', flee: 'ruc_flee', pub: 'pub_win' }[kind];
+    this.audio.play(fx || (w.bad ? 'error' : 'click'));
     if (w.msg) this.announce(w.msg);
+  }
+  /** Walk sounds that are not tied to a message: door chime, throttled footsteps and the [~10 %] time warning (once per walk). */
+  walkSounds(w, dt) {
+    const rt = this.rt;
+    if (w.visiting && !rt.visiting) this.audio.play('enter_shop');
+    rt.visiting = !!w.visiting;
+    const d = this.devDirs();
+    if ((d.x || d.y) && !w.visiting && !w.installing && !w.fleeing) {
+      rt.stepMs = (rt.stepMs || 0) + dt;
+      if (rt.stepMs >= 260) { rt.stepMs = 0; this.audio.play('walk_step'); }
+    }
+    if (rt.warnedWalk !== w && w.timeLeft > 0 && w.timeLeft <= w.timeTotal * 0.1) { rt.warnedWalk = w; this.audio.play('time_warning'); }
   }
   /** Starts the colonist whose turn it is: [Atari code] its own personal event draw (27.5 %), then the walk (human) or the AI's moves. */
   startDevSlot() {
@@ -245,7 +270,7 @@ class Game {
     const fi = this.debugForced.findIndex((id) => EVENT_DEFS[id] && EVENT_DEFS[id].scope === 'individual');
     const forced = p.isHuman && fi >= 0 ? this.debugForced.splice(fi, 1)[0] : null;
     const ev = EventSystem.rollIndividual(s, this.rng, pid, forced);
-    if (ev) { s.event.items.push(ev); this.audio.play('event'); }
+    if (ev) { s.event.items.push(ev); this.audio.play(AudioManager.eventFx(ev.id)); }
     const slot = { pid, event: ev, stage: 'show', timer: 0, log: [], walk: null };
     if (p.isHuman && !this.autopilot) {
       // [C64] the personal event (if any) is shown first, then "press the button to start"; the walk is created by devStart.
@@ -270,7 +295,9 @@ class Game {
       const w = slot.walk;
       DevWalk.update(this.state, w, this.devDirs(), dt);
       if (w.seq !== this.rt.walkSeq) { this.rt.walkSeq = w.seq; this.devFeedback(w); }
+      this.walkSounds(w, dt);
       if (w.ended) {
+        if (w.ended === 'timeout') this.audio.play('time_up');
         const why = w.ended === 'timeout' ? 'S\'ha acabat el temps de desenvolupament.' : w.ended === 'pub' ? 'Has anat al pub: el torn s\'acaba.' : 'Has acabat el torn.';
         slot.stage = 'show'; slot.timer = w.ended === 'pub' ? 2500 : 1500; slot.log = [why, w.msg].filter(Boolean);
       }
@@ -289,7 +316,7 @@ class Game {
     if (la.stage === 'intro' && la.lot) { this.rt.landView = { hi: 0 }; this.announce(`Parcel·la #${la.lot.plotId + 1}: les ofertes comencen a ${la.lot.start} cr`); }
     if (la.stage === 'result') {
       const r = la.result;
-      this.audio.play(r.sold ? 'trade' : 'phase');
+      this.audio.play(r.sold ? 'auction_over' : 'phase');
       this.announce(r.sold ? `Parcel·la venuda! Preu de venda: ${r.price} cr (${playerById(this.state, r.buyer).name})` : 'Sense ofertes. La parcel·la no s\'ha venut!');
     }
   }
@@ -297,7 +324,7 @@ class Game {
   showPlanetCard(ts, rec) {
     ts.phaseData.items = rec ? [rec] : []; ts.phaseData.skippable = true;
     ts.phaseData.timer = rec ? this.fast(4000) : 0;
-    if (rec) { this.audio.play('event'); this.announce(`${rec.name}. ${rec.text}`); }
+    if (rec) { this.audio.play(AudioManager.eventFx(rec.id)); this.announce(`${rec.name}. ${rec.text}`); }
     this.setScreen('map');
   }
   skipPhase() { if (this.turns.phaseData && this.turns.phaseData.skippable) this.turns.canAdvance = true; }
@@ -307,6 +334,7 @@ class Game {
   auctionRole(role) {
     const a = this.rt.auction; if (!a || a.engine.ended || !a.engine.canDeclare()) return;
     if (role !== ROLE.OUT) a.lastRole = role;
+    if (a.engine.entry('p0').role !== role) this.audio.play('declare');
     a.engine.setRole('p0', role);
   }
   /** [Atari code] a human marker moves one step per 8 frames (the line speed of every colonist); Shift x3 is a R.U.C. convenience. */
@@ -333,6 +361,8 @@ class Game {
     const la = this.landAuction(); if (!la || la.stage !== 'bid' || !la.bids.p0 || this.paused) return;
     LandAuction.setBid(this.state, la, 'p0', price); LandAuction.push(la);
   }
+  /** A sparse clock tick while an auction's time units run down: one every 10 units. */
+  auctionTick(before, after) { if (Math.floor(before / 10) !== Math.floor(after / 10)) this.audio.play('auction_tick'); }
   /** Shortens the result card of the current lot (button / Enter). */
   landNext() { const la = this.landAuction(); if (la && la.stage === 'result') la.timer = 0; }
   /** Visible price window: from the store minimum up to a top that only grows during the auction (never past the colonist limit). */
@@ -405,9 +435,11 @@ class Game {
         update: (g, dt, ts) => {
           const land = ts.phaseData.land;
           LandRace.update(g.state, g.rng, land, dt);
+          if (land.cursor >= 0 && land.cursor !== g.rt.cursorAt) g.audio.play('cursor_tick');
+          g.rt.cursorAt = land.cursor;
           const c = land.lastClaim; const key = c ? `${c.pid}@${c.clock}` : '';
           if (c && key !== g.rt.seenClaim) {
-            g.rt.seenClaim = key; g.audio.play(c.pid === 'p0' ? 'trade' : 'phase');
+            g.rt.seenClaim = key; g.audio.play('claim');
             g.announce(`${playerById(g.state, c.pid).name} reclama la parcel·la ${c.plot + 1}`);
           }
           if (land.done) { land.hold -= dt; if (land.hold <= 0) ts.canAdvance = true; }
@@ -430,8 +462,10 @@ class Game {
           const la = ts.phaseData.landAuction;
           if (!g.autopilot) g.updateLandInput(dt);
           const before = `${la.stage}|${la.lot && la.lot.plotId}`;
+          const unitsBefore = la.units;
           LandAuction.update(g.state, g.rng, la, dt);
           if (`${la.stage}|${la.lot && la.lot.plotId}` !== before) g.landAuctionFeedback(la);
+          else if (la.stage === 'bid') g.auctionTick(unitsBefore, la.units);
           if (la.done) ts.canAdvance = true;
         }
       },
@@ -515,7 +549,7 @@ class Game {
     return {
       id: `AUCTION_${def.id}`, label: `Subhasta de ${def.label.toLowerCase()}`, save: true, resumable: true,
       enter: (g, ts) => {
-        const s = g.state; const market = AuctionEngine.fungibleMarket(def); const onTrade = () => g.audio.play('trade');
+        const s = g.state; const market = AuctionEngine.fungibleMarket(def); const onTrade = () => g.audio.play('auction_trade_unit');
         const saved = ts.phaseData.auction;
         if (saved) {
           // Resumed from a save taken mid-auction (declaration or trade stage): exact engine, AI brains and roles.
@@ -539,7 +573,10 @@ class Game {
         if (!e.ended) {
           s.players.forEach((p) => { const b = a.brains[p.id]; if (b) AISystem.tick(s, g.rng, p, b, e, dt); });
           if (!g.autopilot) g.updateAuctionInput(dt);
+          const stage = e.stage; const unitsBefore = e.units;
           e.update(dt);
+          if (e.stage === 'trade' && stage === 'trade') g.auctionTick(unitsBefore, e.units);
+          if (e.ended) g.audio.play('auction_over');
         } else {
           a.endHold += dt; ts.phaseData.skippable = true;
           if (a.endHold >= (g.autopilot ? 200 : 4000)) ts.canAdvance = true;

@@ -111,6 +111,21 @@ alenteixen ([codi Atari] 6 / 14 / 21 fotogrames per pas: plana / riu / muntanya)
 
 Les opcions **So** i **Reduir moviment** són al menú de pausa (i So també al HUD).
 
+## So
+
+Tot el so es sintetitza en temps real amb WebAudio a l'estil del xip SID (`js/ui/audio.js`): no hi ha cap fitxer d'àudio. **Totes les
+músiques i efectes són composicions pròpies**; no s'ha copiat ni derivat res del tema original de M.U.L.E. (notes de recerca a
+`docs/research/audio.md`). L'àudio s'activa amb el primer clic o tecla (norma dels navegadors) i mai atura el joc si falla.
+
+- **Música, només on l'original en tenia**: tema principal al títol i a la configuració; melodia d'estat a la producció, l'estat i
+  l'informe del torn; final d'èxit o de fracàs a la pantalla final. **Sense música** a l'adjudicació de terra, el desenvolupament i les
+  subhastes (els temes `land`, `development` i `auction` existeixen però no es fan servir). La pausa deixa la música en suspens i
+  «So: no» la talla a l'instant.
+- **Efectes**: tic del cursor de terra i reclamació; passes, bram en comprar un RUC, fugida, porta dels edificis, equipament,
+  instal·lació i premi del pub; inici de torn, avís quan queda ~10 % del temps i fi del temps; declaració, tic de subhasta, cada unitat
+  negociada i tancament (també a la subhasta de terres); un efecte per a cada esdeveniment planetari i un de bo o dolent per als
+  personals; la nau aterra a l'inici i s'envola al final.
+
 ## Llavor i determinisme
 
 La configuració mostra una llavor editable (el botó **Nova** en genera una d'aleatòria). La mateixa llavor amb les mateixes

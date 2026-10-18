@@ -26,8 +26,12 @@ class Renderer {
   font_(size, bold = true) { return `${bold ? 'bold ' : ''}${size}px ${this.font}`; }
   measure(str, size) { this.ctx.font = this.font_(size); return this.ctx.measureText(str).width; }
   text(str, x, y, o = {}) {
-    const c = this.ctx; const size = o.size || 16; let s = String(str);
+    const c = this.ctx; let size = o.size || 16; let s = String(str);
     c.font = this.font_(size, o.bold !== false); c.textAlign = o.align || 'left'; c.textBaseline = 'top';
+    if (o.fit && o.maxW) { // shrink (down to 70 %) before falling back to an ellipsis
+      const min = Math.ceil(size * 0.7);
+      while (size > min && c.measureText(s).width > o.maxW) { size -= 1; c.font = this.font_(size, o.bold !== false); }
+    }
     if (o.maxW && c.measureText(s).width > o.maxW) {
       while (s.length > 1 && c.measureText(`${s}…`).width > o.maxW) s = s.slice(0, -1);
       s += '…';

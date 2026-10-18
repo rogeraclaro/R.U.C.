@@ -1450,6 +1450,75 @@ function runSelfTests() {
     }
     return 'no seed with a land auction in round 1';
   });
+
+  /* ---------- audio (no AudioContext: only the decisions about what plays) ---------- */
+  /** Stand-in for AudioManager that records every call. */
+  const audioSpy = () => {
+    const log = [];
+    return { log, play: (k) => log.push(k), music: (id) => log.push(`music:${id}`), stopMusic: () => log.push('music:-'), hold: (on) => log.push(`hold:${on}`), soundChanged: () => log.push('sound'), unlock() {} };
+  };
+  t('Audio: music only where the original had it (title/setup, production-status-report, game over); none in land, development, auctions', () => {
+    const tf = (mode, phase = null, extra = {}) => AudioManager.trackFor({ mode, phase, ...extra });
+    const want = [
+      [tf('title'), 'title'], [tf('setup'), 'title'], [tf('test'), null], [tf('loading'), null],
+      [tf('play', 'PRODUCTION'), 'status'], [tf('play', 'STATUS'), 'status'], [tf('play', 'TURN_REPORT'), 'status'],
+      [tf('play', 'AUTOSAVE'), 'status'], [tf('play', 'PLANET_EVENT_AFTER', { card: false }), 'status'], [tf('play', 'PLANET_EVENT_AFTER', { card: true }), null],
+      [tf('play', 'LAND_GRANT'), null], [tf('play', 'LAND_AUCTION'), null], [tf('play', 'DEVELOPMENT'), null], [tf('play', 'AUCTION_food'), null], [tf('play', 'TURN_START'), null],
+      [tf('play', null, { gameOver: true, survives: true }), 'end_success'], [tf('play', null, { gameOver: true, survives: false }), 'end_failure']
+    ];
+    const bad = want.map(([got, exp], i) => (got === exp ? null : `#${i} ${got}!=${exp}`)).filter(Boolean);
+    return bad.length ? bad.join(', ') : true;
+  });
+  t('Audio: every planetary event has its own effect; personal events sound good or bad by their quality', () => {
+    const planet = Object.values(EVENT_DEFS).filter((d) => d.scope === 'planet');
+    const miss = planet.filter((d) => !AudioManager.FX[AudioManager.eventFx(d.id)]).map((d) => d.id);
+    if (miss.length) return `no effect for ${miss}`;
+    if (new Set(planet.map((d) => AudioManager.eventFx(d.id))).size !== planet.length) return 'two planetary events share an effect';
+    if (AudioManager.eventFx('landing') !== 'ship_land') return 'landing';
+    const ind = Object.values(EVENT_DEFS).filter((d) => d.scope === 'individual');
+    const wrong = ind.filter((d) => AudioManager.eventFx(d.id) !== (d.quality > 0 ? 'event_good' : 'event_bad')).map((d) => d.id);
+    return wrong.length ? `personal ${wrong}` : true;
+  });
+  t('Audio: never throws without an AudioContext; switching the sound off stops the music at once and on resumes it', () => {
+    const settings = { sound: true }; const a = new AudioManager({ settings });
+    AudioManager.KINDS.forEach((k) => a.play(k)); AudioManager.TRACKS.forEach((id) => a.music(id)); a.hold(true); a.hold(false); a.play('nope'); a.music('nope');
+    a.stopMusic(); if (a.timer) return 'stopMusic left the scheduler running';
+    a.wanted = 'status'; a.playing = 'status'; settings.sound = false; a.soundChanged();
+    if (a.playing !== null || a.wanted !== 'status') return `off: playing ${a.playing}, wanted ${a.wanted}`;
+    a.stopMusic();
+    const g = mkGame(); const spy = audioSpy(); g.audio = spy; const before = g.settings.sound;
+    g.toggleSound(); g.toggleSound();
+    return g.settings.sound === before && spy.log.join() === 'sound,sound' ? true : `toggle log ${spy.log}`;
+  });
+  t('Audio: the game asks for the phase music and holds it while paused', () => {
+    const g = mkGame(); const spy = audioSpy(); g.audio = spy;
+    g.mode = 'title'; g.syncMusic(); g.syncMusic();
+    if (spy.log.filter((x) => x.startsWith('music:')).join() !== 'music:title') return `title: ${spy.log}`;
+    g.newGame({ seed: 'music-1' }); spy.log.length = 0; g.syncMusic();
+    if (!spy.log.includes('music:-')) return `no music at the landing: ${spy.log}`;
+    g.paused = true; spy.log.length = 0; g.syncMusic();
+    if (!spy.log.includes('hold:true')) return `pause did not hold the music: ${spy.log}`;
+    g.paused = false; spy.log.length = 0; g.syncMusic();
+    return spy.log.includes('hold:false') ? true : `unpause: ${spy.log}`;
+  });
+  t('Audio: the walk warns once when ~10 % of the time is left, then "time up"; turn start and land cursor ticks sound', () => {
+    const g = mkGame(); const spy = audioSpy(); g.audio = spy; g.newGame({ seed: 'ready-1' });
+    let guard = 0; let ticks = 0;
+    while (guard++ < 200000 && !(g.turns.phase === 'DEVELOPMENT' && g.devSlot() && g.devSlot().pid === 'p0')) {
+      if (g.turns.phase === 'LAND_GRANT') ticks += 1;
+      if (g.turns.phaseData.skippable) g.skipPhase(); g.tick(50);
+    }
+    if (!ticks || !spy.log.includes('cursor_tick')) return 'no cursor ticks during the land grant';
+    if (!spy.log.includes('claim')) return 'no claim sound';
+    spy.log.length = 0; g.devStart();
+    const w = g.humanWalk(); let warnedAt = null;
+    while (g.humanWalk()) { g.tick(50); if (warnedAt === null && spy.log.includes('time_warning')) warnedAt = w.timeLeft / w.timeTotal; }
+    const n = (k) => spy.log.filter((x) => x === k).length;
+    if (n('turn_start') !== 1) return `turn_start x${n('turn_start')}`;
+    if (n('time_warning') !== 1) return `time_warning x${n('time_warning')}`;
+    if (!(warnedAt > 0.08 && warnedAt <= 0.1)) return `warned at ${warnedAt}`;
+    return n('time_up') === 1 ? true : `time_up x${n('time_up')}`;
+  });
   t('Game: a full 12-turn autopilot game ends; the same seed gives the same game; ledger, RUCs and result consistent', () => {
     const play = (seed) => { const g = mkGame(); g.autopilot = true; g.newGame({ seed, level: 'standard' }); for (let n = 0; n < 400000 && g.state.phase !== 'GAME_OVER'; n++) g.tick(50); return g; };
     const a = play('full-1'); const b = play('full-1');

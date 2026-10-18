@@ -159,7 +159,7 @@ const DevWalk = {
       if (w.carrying) {
         const back = StoreSystem.refundRuc(state, w.pid, w.carrying.paid); const mod = w.carrying.module;
         w.carrying = null;
-        return this.say(w, `RUC retornat al corral: +${back} cr${mod ? ` (l'equip de ${resLabel(mod).toLowerCase()} no es retorna)` : ''}.`, false, 'return');
+        return this.say(w, `RUC retornat al corral: +${back} cr${mod ? ` (l'equip de ${resLabel(mod).toLowerCase()} es perd)` : ''}.`, false, 'return');
       }
       const r = StoreSystem.buyRuc(state, w.pid);
       if (!r.ok) return this.say(w, r.reason === 'no_cash' ? 'No tens prou crèdits per a un RUC.' : 'El corral és buit: no queden RUCs.', true);
@@ -171,7 +171,7 @@ const DevWalk = {
     const m = StoreSystem.buyModule(state, w.pid, b.res);
     if (!m.ok) return this.say(w, 'No tens prou crèdits per a aquest equip.', true);
     w.carrying.module = b.res;
-    return this.say(w, `RUC equipat per a ${resLabel(b.res).toLowerCase()}: -${m.price} cr. Porta'l a la casa d'una parcel·la teva.`, false, 'outfit');
+    return this.say(w, `Equipat per a ${resLabel(b.res).toLowerCase()} (-${m.price} cr): porta'l a una parcel·la teva.`, false, 'outfit');
   },
   /**
    * [manual][C64] land office (Standard): first visit "MARK PLOT TO SELL THEN COME BACK.", then the button over one of your plots
@@ -183,7 +183,7 @@ const DevWalk = {
     if (!w.marking) { w.marking = true; w.markPlot = null; return this.say(w, 'Marca la parcel·la per vendre i torna.', false, 'office'); }
     if (w.markPlot === null) return this.say(w, 'Cap parcel·la marcada.', true, 'no_mark');
     const id = w.markPlot; LandOffice.mark(state, w.pid, id); w.marking = false; w.markPlot = null;
-    return this.say(w, `Parcel·la #${id + 1} marcada per vendre: sortirà a la propera subhasta de terres.`, false, 'for_sale');
+    return this.say(w, `Parcel·la #${id + 1} en venda: sortirà a la propera subhasta de terres.`, false, 'for_sale');
   },
   /** The "joystick button" (Enter / Space / Acció). It only does something on the map; clicks on the map never call it. */
   act(state, w) {

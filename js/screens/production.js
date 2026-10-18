@@ -5,7 +5,7 @@ class ProductionScreen {
     const s = game.state; const prod = game.rt.prod; const T = CONFIG.TILE;
     r.asset('bg_irata_sky', 0, 0, CONFIG.W, CONFIG.H); r.dim(0.55);
     Hud.draw(game, r);
-    r.text('Producció: menjar i smithore gasten 1 energia de la reserva; l\'energia s\'autoalimenta', 16, 66, { size: 20, color: COL.amber, maxW: 1240 });
+    r.text('Producció: cada RUC de menjar o smithore gasta 1 energia', 16, 66, { size: 20, color: COL.amber, maxW: 860 });
     const order = prod.order; const t = prod.t;
     const t0 = 800; const t1 = prod.duration - 1300;
     const per = order.length ? (t1 - t0) / order.length : 1;

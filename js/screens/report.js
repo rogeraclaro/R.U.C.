@@ -14,10 +14,10 @@ class ReportScreen {
     r.text(`Estat del torn ${s.turn}: reserva, consum, malbaratament i collita`, 70, 84, { size: 26, color: COL.amber });
     r.wrap(`Cada colon menja ${st.need} de menjar. Després es malbarata el 50% del menjar i el 25% de l'energia que queden a la reserva (smithore: només per sobre de 50). La collita nova arriba després i no es malbarata.`, 70, 122, 1140, 22, { size: 16, color: COL.dim });
     const cx = (k) => 280 + k * 310;
-    r.text('Cada casella: reserva − ús − malbaratat + collita nova = final', 280, 160, { size: 16, color: COL.cyan, maxW: 930 });
-    res.forEach((d, k) => { r.icon(d.id, cx(k), 184, 22); r.text(d.label, cx(k) + 28, 186, { size: 16, color: COL.dim, maxW: 270 }); });
+    r.text('Cada casella: reserva − ús − malbaratat + collita nova = final', 280, 168, { size: 16, color: COL.cyan, maxW: 930 });
+    res.forEach((d, k) => { r.icon(d.id, cx(k), 190, 22); r.text(d.label, cx(k) + 28, 192, { size: 16, color: COL.dim, maxW: 270 }); });
     st.rows.forEach((row, i) => {
-      const p = playerById(s, row.playerId); const y = 218 + i * 86;
+      const p = playerById(s, row.playerId); const y = 224 + i * 86;
       r.glyph(p.shape, 80, y + 12, 9, p.color, '#05070d');
       r.text(p.name, 100, y, { size: 20, color: p.isHuman ? COL.amber : COL.text, maxW: 170 });
       res.forEach((d, k) => r.text(`${row.start[d.id]} −${row.used[d.id]} −${row.spoiled[d.id]} +${row.produced[d.id]}${row.lost && row.lost[d.id] ? ` −${row.lost[d.id]}` : ''} = ${row.final[d.id]}`, cx(k), y, { size: 20, maxW: 300 }));
@@ -61,7 +61,7 @@ class ReportScreen {
     enabledResources().forEach((d, i) => r.text(`${d.label}: ${s.store.stock[d.id]} u · preu ${StoreSystem.price(s, d)} cr (compra ${StoreSystem.bid(s, d)} · ven ${StoreSystem.ask(s, d)})`, 760, 432 + i * 26, { size: 16, maxW: 460 }));
     const surv = ScoringSystem.survival(s);
     r.text(`Patrimoni de la colònia: ${surv.combined} cr (cal ${surv.needCombined} al final del torn ${lastRound(s)})`, 70, 530, { size: 18, color: surv.survives ? COL.good : COL.amber, maxW: 1100 });
-    (s.event && s.event.items || []).slice(0, 3).forEach((ev, i) => r.text(`${ev.scope === 'planet' ? 'Planetari' : 'Individual'}: ${ev.text}`, 70, 566 + i * 24, { size: 16, color: COL.dim, maxW: 1100 }));
+    (s.event && s.event.items || []).slice(0, 3).forEach((ev, i) => r.text(`${ev.scope === 'planet' ? 'Planetari' : 'Individual'}: ${ev.text}`, 70, 566 + i * 24, { size: 16, color: COL.dim, maxW: 1140, fit: true }));
     r.button('rep-next', s.turn >= lastRound(s) ? 'Veure el resultat final' : 'Torn següent', 470, 646, 340, 52, { primary: true, size: 20, onClick: () => game.skipPhase() });
   }
 }

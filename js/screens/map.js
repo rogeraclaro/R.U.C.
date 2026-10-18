@@ -423,7 +423,9 @@ class MapScreen {
       return;
     }
     r.text(`Torn de desenvolupament de ${who.name}${dev.reversed ? ' · corral amb 7 RUCs o menys: ordre invers' : ''}`, X + 84, Y + 8, { size: 18, maxW: 770 });
-    (slot.log || []).slice(0, 3).forEach((l, i) => r.text(l, X + 84, Y + 36 + i * 24, { size: 16, color: COL.dim, maxW: 770 }));
+    // Long personal-event texts wrap onto a second line instead of being cut; at most 4 lines fit the panel.
+    let ly = Y + 34;
+    (slot.log || []).forEach((l) => { if (ly <= Y + 94) ly += r.wrap(l, X + 84, ly, 770, 20, { size: 16, color: COL.dim }); });
   }
   /**
    * [C64] "PRESS YOUR STICK BUTTON TO START": the personal event (if any) is shown first, above the prompt; nothing runs until the
@@ -435,7 +437,7 @@ class MapScreen {
     if (ev) {
       const x = 340; const y = 96; const w = 600;
       r.panel(x, y, w, 330, { border: ev.negative ? COL.bad : COL.good });
-      r.text(ev.name, x + w / 2, y + 14, { size: 24, color: ev.negative ? COL.bad : COL.good, align: 'center', maxW: w - 20 });
+      r.text(ev.name, x + w / 2, y + 14, { size: 24, color: ev.negative ? COL.bad : COL.good, align: 'center', maxW: w - 20, fit: true });
       r.assetFrame('event_cards_strip', x + 160, y + 50, w - 320, 150, ev.art);
       r.wrap(ev.text, x + 24, y + 214, w - 48, 24, { size: 18, align: 'center' });
     }
@@ -457,16 +459,16 @@ class MapScreen {
       r.text(emptyText, 640, 330, { size: 20, align: 'center', maxW: 560 });
     }
     items.forEach((ev, i) => {
-      const x = x0 + i * (w + gap); const y = 130;
+      const x = x0 + i * (w + gap); const y = 104;
       r.panel(x, y, w, 460, { border: ev.negative ? COL.bad : COL.good });
       r.text(`Torn ${game.state.turn} · ${ev.scope === 'planet' ? 'Planetari' : 'Individual'}`, x + w / 2, y + 12, { size: 16, color: COL.dim, align: 'center' });
-      r.text(ev.name, x + w / 2, y + 40, { size: 26, color: ev.negative ? COL.bad : COL.good, align: 'center', maxW: w - 20 });
+      r.text(ev.name, x + w / 2, y + 40, { size: 26, color: ev.negative ? COL.bad : COL.good, align: 'center', maxW: w - 20, fit: true });
       r.assetFrame('event_cards_strip', x + 40, y + 88, w - 80, 220, ev.art);
       r.wrap(ev.text, x + 20, y + 320, w - 40, 24, { size: 18, align: 'center' });
       r.text('Esdeveniment original (C64)', x + w / 2, y + 430, { size: 16, color: COL.dim, align: 'center', maxW: w - 20 });
     });
     const skip = () => game.skipPhase();
     r.region('event-skip', 0, 0, CONFIG.W, CONFIG.H, { focusable: true, label: 'Salta la targeta', onClick: skip, onKey: (e) => { if (e.key === 'Enter' || e.key === ' ') { skip(); return true; } return false; } });
-    r.text('Clic, Enter o Espai per continuar', 640, 620, { size: 16, color: COL.dim, align: 'center' });
+    r.text('Clic, Enter o Espai per continuar', 640, 572, { size: 16, color: COL.dim, align: 'center' });
   }
 }
