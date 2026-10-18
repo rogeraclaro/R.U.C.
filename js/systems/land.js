@@ -8,6 +8,12 @@ const LandGrantSystem = {
     playerById(state, playerId).plots.push(plotId);
     return true;
   },
+  /** A land-auction sale: the plot (with any M.U.L.E. on it, [PROVISIONAL]) changes owner. */
+  transfer(state, plotId, toId) {
+    const plot = plotById(state, plotId); const from = plot.ownerId ? playerById(state, plot.ownerId) : null;
+    if (from) from.plots = from.plots.filter((k) => k !== plotId);
+    plot.ownerId = toId; playerById(state, toId).plots.push(plotId);
+  },
   /** Tie-break order for simultaneous claims: the previous order rotated by one position each turn (turn 1: as created). */
   tieOrder(state) {
     const prev = state.landOrder;
@@ -148,13 +154,14 @@ const LandRace = {
 };
 
 /**
- * Land office ([manual] Standard and Tournament): a colonist marks one of its plots for sale; it is auctioned in the next round's
- * land auction. Batch 4 implements the auction; here the mark is only stored ({ pid, plotId, turn }, one per colonist) and shown.
+ * Land office ([manual] Standard and Tournament): a colonist marks one of its plots for sale ({ pid, plotId, turn }, one per colonist);
+ * it is auctioned in the next round's land auction (LandAuction), which clears the mark whether the plot sells or not.
  * A mark on a plot the colonist no longer owns (lost to an event) simply does not count.
  */
 const LandOffice = {
   mark(state, pid, plotId) {
     state.landSales = (state.landSales || []).filter((x) => x.pid !== pid).concat([{ pid, plotId, turn: state.turn }]);
   },
+  clear(state, plotId) { state.landSales = (state.landSales || []).filter((x) => x.plotId !== plotId); },
   forSale(state) { return (state.landSales || []).filter((x) => { const p = state.plots[x.plotId]; return p && p.ownerId === x.pid; }); }
 };

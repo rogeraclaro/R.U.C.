@@ -10,7 +10,7 @@ class Game {
     this.setup = { name: 'Roger', color: 'yellow', level: 'standard', species: 'mechtron', seed: this.randomSeed() };
     this.renderer = new Renderer(canvas, this); this.input = new InputManager(canvas, this); this.audio = new AudioManager(this);
     const map = new MapScreen();
-    this.screens = { title: new TitleScreen(), setup: new SetupScreen(), map, production: new ProductionScreen(map), report: new ReportScreen(), auction: new AuctionScreen(), gameover: new GameOverScreen() };
+    this.screens = { title: new TitleScreen(), setup: new SetupScreen(), map, production: new ProductionScreen(map), report: new ReportScreen(), auction: new AuctionScreen(), landAuction: new LandAuctionScreen(), gameover: new GameOverScreen() };
     this.screen = this.screens.title; this.screenCtx = null;
     this.help = new HelpOverlay(); this.pauseOv = new PauseOverlay();
     this.defineTurnPhases();
@@ -172,15 +172,16 @@ class Game {
   }
 
   /* ---- what the HUD/instruction line shows ---- */
-  /** { left, total } for the HUD's shrinking time bar (auctions), or null. Development uses the vertical bar on the map (MapScreen.timeBar). */
+  /** { left, total } time-bar units for the HUD's shrinking bar (auctions), or null. Development uses the vertical bar on the map (MapScreen.timeBar). */
   hudTimer() {
     const ph = this.turns.phase;
-    if (ph && ph.startsWith('AUCTION_') && this.rt.auction) {
-      const e = this.rt.auction.engine;
-      return e.canDeclare() ? { left: e.declareLeft, total: CONFIG.AUCTION.declareMs } : { left: Math.max(0, CONFIG.AUCTION.maxMs - e.t), total: CONFIG.AUCTION.maxMs };
-    }
+    if (ph && ph.startsWith('AUCTION_') && this.rt.auction) { const e = this.rt.auction.engine; return { left: e.units, total: e.unitsTotal }; }
+    const la = this.landAuction();
+    if (la && la.stage === 'bid') return { left: la.units, total: la.unitsTotal };
     return null;
   }
+  /** The live land-auction object while the LAND_AUCTION phase runs (null otherwise). */
+  landAuction() { return this.turns.phase === 'LAND_AUCTION' && this.turns.phaseData ? this.turns.phaseData.landAuction || null : null; }
   /** The live land-race object while the LAND_GRANT phase runs (null otherwise). */
   landRace() { return this.turns.phase === 'LAND_GRANT' && this.turns.phaseData ? this.turns.phaseData.land || null : null; }
   /** The colonist whose development turn is running (null outside DEVELOPMENT). */
@@ -283,6 +284,15 @@ class Game {
     this.save();
     this.startDevSlot();
   }
+  /** Sounds and screen-reader text when a land-auction lot changes stage. */
+  landAuctionFeedback(la) {
+    if (la.stage === 'intro' && la.lot) { this.rt.landView = { hi: 0 }; this.announce(`Parcel·la #${la.lot.plotId + 1}: les ofertes comencen a ${la.lot.start} cr`); }
+    if (la.stage === 'result') {
+      const r = la.result;
+      this.audio.play(r.sold ? 'trade' : 'phase');
+      this.announce(r.sold ? `Parcel·la venuda! Preu de venda: ${r.price} cr (${playerById(this.state, r.buyer).name})` : 'Sense ofertes. La parcel·la no s\'ha venut!');
+    }
+  }
   /** Shows a planetary card; a quiet round (no event, or no target) shows nothing and moves on at once, as the original. */
   showPlanetCard(ts, rec) {
     ts.phaseData.items = rec ? [rec] : []; ts.phaseData.skippable = true;
@@ -299,6 +309,8 @@ class Game {
     if (role !== ROLE.OUT) a.lastRole = role;
     a.engine.setRole('p0', role);
   }
+  /** [Atari code] a human marker moves one step per 8 frames (the line speed of every colonist); Shift x3 is a R.U.C. convenience. */
+  humanStepsPerSec() { return (1000 / AuctionEngine.lineMs()) * (this.input.keys.has('Shift') ? 3 : 1); }
   auctionToggleOut() {
     const a = this.rt.auction; if (!a) return;
     this.auctionRole(a.engine.entry('p0').role === ROLE.OUT ? (a.lastRole || ROLE.BUYER) : ROLE.OUT);
@@ -306,10 +318,23 @@ class Game {
   updateAuctionInput(dt) {
     const a = this.rt.auction; const e = a.engine; const k = this.input.keys;
     if (e.stage !== 'trade' || e.entry('p0').role === ROLE.OUT) return;
-    const speed = CONFIG.AUCTION.humanStepsPerSec * (k.has('Shift') ? 3 : 1);
-    if (k.has('ArrowUp')) e.nudge('p0', 1, dt, speed);
-    if (k.has('ArrowDown')) e.nudge('p0', -1, dt, speed);
+    const dir = (k.has('ArrowUp') ? 1 : 0) - (k.has('ArrowDown') ? 1 : 0);
+    if (dir) { e.nudge('p0', dir, dt, this.humanStepsPerSec()); e.push(); }
   }
+  /** Human marker in the land auction: the same keys and line speed as the goods auction. */
+  updateLandInput(dt) {
+    const la = this.landAuction(); const k = this.input.keys;
+    if (!la || la.stage !== 'bid' || !la.bids.p0) return;
+    const dir = (k.has('ArrowUp') ? 1 : 0) - (k.has('ArrowDown') ? 1 : 0);
+    if (dir) { LandAuction.nudge(this.state, la, 'p0', dir, dt, this.humanStepsPerSec()); LandAuction.push(la); }
+  }
+  /** Pointer / touch: puts the human's land bid at a price (dragging the lane or the buttons). */
+  landBid(price) {
+    const la = this.landAuction(); if (!la || la.stage !== 'bid' || !la.bids.p0 || this.paused) return;
+    LandAuction.setBid(this.state, la, 'p0', price); LandAuction.push(la);
+  }
+  /** Shortens the result card of the current lot (button / Enter). */
+  landNext() { const la = this.landAuction(); if (la && la.stage === 'result') la.timer = 0; }
   /** Visible price window: from the store minimum up to a top that only grows during the auction (never past the colonist limit). */
   auctionView() {
     const a = this.rt.auction; const e = a.engine; const m = e.market;
@@ -322,7 +347,9 @@ class Game {
   /* ---- debug ---- */
   debugNextPhase() {
     const a = this.rt.auction;
+    const la = this.landAuction();
     if (a && this.turns.phase && this.turns.phase.startsWith('AUCTION_') && !a.engine.ended) a.engine._end('debug');
+    else if (la && !la.done) LandAuction.finish(this.state, la);
     else if (this.turns.phase === 'DEVELOPMENT' && this.humanWalk()) this.devFinish();
     else this.turns.canAdvance = true;
   }
@@ -384,6 +411,28 @@ class Game {
             g.announce(`${playerById(g.state, c.pid).name} reclama la parcel·la ${c.plot + 1}`);
           }
           if (land.done) { land.hold -= dt; if (land.hold <= 0) ts.canAdvance = true; }
+        }
+      },
+      {
+        // [Atari code][C64] Standard: right after the land grant, the marked plots and 0-3 colony plots are auctioned (LandAuction).
+        id: 'LAND_AUCTION', label: 'Subhasta de terres', save: true, resumable: true,
+        enter: (g, ts) => {
+          if (!ts.phaseData.landAuction) {
+            const aiIds = g.state.players.filter((p) => !p.isHuman || g.autopilot).map((p) => p.id);
+            ts.phaseData.landAuction = LandAuction.create(g.state, g.rng, aiIds, { fast: g.autopilot });
+          }
+          const la = ts.phaseData.landAuction;
+          if (la.done) { ts.canAdvance = true; return; }
+          g.setScreen('landAuction'); g.rt.landView = { hi: 0 };
+          g.announce(`Subhasta de terres: les ofertes comencen a ${la.lot.start} cr`);
+        },
+        update: (g, dt, ts) => {
+          const la = ts.phaseData.landAuction;
+          if (!g.autopilot) g.updateLandInput(dt);
+          const before = `${la.stage}|${la.lot && la.lot.plotId}`;
+          LandAuction.update(g.state, g.rng, la, dt);
+          if (`${la.stage}|${la.lot && la.lot.plotId}` !== before) g.landAuctionFeedback(la);
+          if (la.done) ts.canAdvance = true;
         }
       },
       {
@@ -472,14 +521,14 @@ class Game {
           // Resumed from a save taken mid-auction (declaration or trade stage): exact engine, AI brains and roles.
           g.rt.auction = { engine: AuctionEngine.restore(saved.engine, { market, state: s, rng: g.rng, onTrade }), brains: JSON.parse(JSON.stringify(saved.brains)), res: def.id, endHold: saved.endHold, lastRole: saved.lastRole, viewHi: saved.viewHi };
         } else {
-          const engine = new AuctionEngine({ market, state: s, rng: g.rng, colonists: s.players.map((p) => p.id), onTrade, declareMs: CONFIG.AUCTION.declareMs });
+          const engine = new AuctionEngine({ market, state: s, rng: g.rng, colonists: s.players.map((p) => p.id), onTrade });
           const brains = {};
           s.players.forEach((p) => { if (!p.isHuman || g.autopilot) brains[p.id] = AISystem.createBrain(s, g.rng, p); });
           // [manual] with a surplus your character jumps to SELL, otherwise to BUY; the human can change it until the declaration ends.
           s.players.forEach((p) => { if (p.isHuman && !g.autopilot) engine.setRole(p.id, AISystem.defaultRole(s, p, def.id)); });
           g.rt.auction = { engine, brains, res: def.id, endHold: 0, lastRole: ROLE.BUYER, viewHi: 0 };
         }
-        g.setScreen('auction'); g.announce(`Subhasta de ${def.label}: declara comprador, venedor o fora`);
+        g.setScreen('auction'); g.announce(`Subhasta de ${def.label}: declareu-vos compradors o venedors`);
       },
       snapshot: (g, ts) => {
         const a = g.rt.auction;
@@ -512,7 +561,7 @@ class Game {
   const assets = new AssetLoader();
   const game = new Game(canvas, assets);
   game.debug = params.get('debug') === '1';
-  window.RUC = { game, assets, runSelfTests, CONFIG, FEATURES, AuctionEngine, ResourceLedger, RucAudit, ScoringSystem, SaveSystem, GameState, AISystem, SettlementSystem, EventSystem, DevWalk, PubSystem, LandOffice };
+  window.RUC = { game, assets, runSelfTests, CONFIG, FEATURES, AuctionEngine, LandAuction, ResourceLedger, RucAudit, ScoringSystem, SaveSystem, GameState, AISystem, SettlementSystem, EventSystem, DevWalk, PubSystem, LandOffice };
   if (params.get('test') === '1') {
     game.mode = 'test'; game.testResults = runSelfTests(); window.__testResults = game.testResults;
     console.log(`SELFTESTS ${game.testResults.passed}/${game.testResults.total}`);

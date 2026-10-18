@@ -20,7 +20,11 @@ function runSelfTests() {
     if (n > cur) ResourceLedger.moveCash(state, 'nature', id, n - cur); else if (n < cur) ResourceLedger.moveCash(state, id, 'nature', cur - n);
   };
   const audited = (state, carried = 0) => { const bad = ResourceLedger.audit(state); if (!RucAudit.ok(state, carried)) bad.push(`RUCs ${JSON.stringify(RucAudit.count(state, carried))}`); return bad.length ? bad.join(';') : true; };
-  const engineFor = (state, rng, res, ids, withStore = false, declareMs = 0) => new AuctionEngine({ market: AuctionEngine.fungibleMarket(RESOURCE_DEFS[res]), state, rng, colonists: ids, withStore, declareMs });
+  /** `declare` false: the declaration has 0 units left, so roles can still be set and the first update starts the trade stage. */
+  const engineFor = (state, rng, res, ids, withStore = false, declare = false) => new AuctionEngine({ market: AuctionEngine.fungibleMarket(RESOURCE_DEFS[res]), state, rng, colonists: ids, withStore, declare });
+  /** Frames (PAL) -> ms, unrounded (auction ticks and the trade cadence). */
+  const fms = (frames) => frames * 1000 / CONFIG.DEV.palHz;
+  const runEngine = (e, ms, step = 10) => { for (let k = 0; k < ms && !e.ended; k += step) e.update(step); };
   /** A plot with a RUC taken from the corral (so the RUC book-keeping stays exact). */
   const develop = (state, pid, plotId, module) => { LandGrantSystem.assign(state, pid, plotId); const r = StoreSystem.buyRuc(state, pid); state.plots[plotId].ruc = { module, paid: r.price }; return state.plots[plotId]; };
   /** Stand-alone plots (custom tiny maps) for pure production maths. */
@@ -318,16 +322,16 @@ function runSelfTests() {
     const mule = [49, 50, 57, 20, 250].map((P) => { state.storePrice.smithore = P; return StoreSystem.rucPrice(state); }).join();
     return eq(mule, '90,100,110,40,500', 'RUC price');
   });
-  t('Auction: [manual] with the store out of stock colonists trade above the store top; with stock a colonist price stops at it (250 + 20)', () => {
-    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 3); setCash(state, 'p0', 2000);
+  t('Auction: [manual] with the store out of stock colonists trade above the store top; with stock a buyer stops at the store sell line', () => {
+    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 6); setCash(state, 'p0', 2000); // above p1's critical level (3)
     ResourceLedger.moveItem(state, 'food', 'store', 'nature', 8);
     const e = engineFor(state, rng, 'food', ['p0', 'p1'], true);
-    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 300); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 300); e.update(600);
+    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 300); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 300); runEngine(e, 1000);
     if (e.volume !== 1 || e.trades[0].price !== 300) return `no trade above the store ceiling: ${JSON.stringify(e.trades)}`;
     if (ResourceLedger.audit(state).length) return 'ledger';
     const b = fresh(); const e2 = engineFor(b.state, b.rng, 'food', ['p0', 'p1'], true);
     e2.setRole('p0', ROLE.BUYER); e2.setPrice('p0', 500);
-    return eq(e2.entry('p0').price, 270, 'price with store stock');
+    return eq(e2.entry('p0').price, 50, 'buyer price with store stock (store ask 50)');
   });
 
   /* ---------- P1.6 + 6 bis: walking development, return and runaway RUCs ---------- */
@@ -636,20 +640,55 @@ function runSelfTests() {
     const phases = mkGame().turns.phases.map((p) => p.id).filter((id) => id.startsWith('AUCTION_')).join();
     return eq(phases, 'AUCTION_smithore,AUCTION_food,AUCTION_energy', 'phase order');
   });
+  t('Auction timing: [C64] declare 31 units x 7 frames (~4.3 s); trading 72 units x 8 frames (~11.5 s) when idle', () => {
+    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 9);
+    const e = engineFor(state, rng, 'food', ['p0', 'p1'], true, true);
+    e.setRole('p0', ROLE.BUYER); e.setRole('p1', ROLE.SELLER);
+    const declare = 31 * fms(7); const trade = 72 * fms(8);
+    runEngine(e, Math.floor(declare / 10) * 10);
+    if (e.stage !== 'declare') return `declaration ended early (${e.clock} ms)`;
+    runEngine(e, 20); if (e.stage !== 'trade') return 'the declaration did not end at 31 x 7 frames';
+    if (e.unitsTotal !== 72 || Math.abs(e.units - 72) > 0.3) return `trade units ${e.units}/${e.unitsTotal}`;
+    const left = trade - (e.clock - declare);
+    runEngine(e, Math.floor(left / 10) * 10 - 10); if (e.ended) return `ended early: ${e.endReason} at ${e.clock}`;
+    runEngine(e, 30); return eq(e.endReason, 'time', `end after ${Math.round(declare + trade)} ms`);
+  });
+  t('Auction timing: [C64] 60 frames per unit while a buyer and a seller touch; [Atari code] a full ATU (30 frames) while a stick is pushed', () => {
+    const mk = () => { const { state, rng } = fresh(); setInv(state, 'p1', 'food', 30); setCash(state, 'p0', 5000); const e = engineFor(state, rng, 'food', ['p0', 'p1']); e.setRole('p1', ROLE.SELLER); e.setRole('p0', ROLE.BUYER); return e; };
+    const idle = mk(); runEngine(idle, 1000);
+    if (Math.abs((72 - idle.units) - 1000 / fms(8)) > 0.1) return `idle used ${72 - idle.units}`;
+    const push = mk(); for (let k = 0; k < 100; k++) { push.push(); push.update(10); }
+    if (Math.abs((72 - push.units) - 1000 / fms(30)) > 0.1) return `pushing used ${72 - push.units}`;
+    const touch = mk(); touch.setPrice('p1', 40); touch.setPrice('p0', 40); runEngine(touch, 1000);
+    if (!touch.contact.key) return 'no contact';
+    return Math.abs((72 - touch.units) - 1000 / fms(60)) < 0.1 ? true : `contact used ${72 - touch.units}`;
+  });
+  t('Auction timing: [Atari code] Beginner ATU 50 instead of 30 (every tick x 5/3), doubled in round 1', () => {
+    const units = (level, turn) => { const { state, rng } = fresh('bt', level); state.turn = turn; const e = engineFor(state, rng, 'food', ['p0'], false, true); runEngine(e, 1000); return 31 - e.units; };
+    const std = units('standard', 1); const b2 = units('beginner', 2); const b1 = units('beginner', 1);
+    if (Math.abs(std - 1000 / fms(7)) > 0.1) return `standard ${std}`;
+    if (Math.abs(b2 - std * 3 / 5) > 0.1) return `beginner round 2 ${b2}`;
+    return Math.abs(b1 - std * 3 / 10) < 0.1 ? true : `beginner round 1 ${b1}`;
+  });
   t('Declaration: roles change freely until the declare timer ends, then they are fixed; no trade meanwhile', () => {
     const { state, rng } = fresh(); setInv(state, 'p1', 'food', 5);
-    const e = engineFor(state, rng, 'food', ['p0', 'p1'], false, 3000);
+    const e = engineFor(state, rng, 'food', ['p0', 'p1'], false, true);
     if (!e.setRole('p0', ROLE.SELLER) || !e.setRole('p0', ROLE.BUYER) || !e.setRole('p1', ROLE.SELLER)) return 'declaring failed';
-    e.setPrice('p0', 60); e.setPrice('p1', 20);
-    e.update(2990); if (e.volume || e.stage !== 'declare') return 'traded or ended the declaration early';
-    e.update(10); if (e.stage !== 'trade') return 'the declaration did not end';
+    e.setPrice('p1', 40); e.setPrice('p0', 60);
+    runEngine(e, 4300); if (e.volume || e.stage !== 'declare') return 'traded or ended the declaration early';
+    runEngine(e, 40); if (e.stage !== 'trade') return 'the declaration did not end';
     if (e.setRole('p0', ROLE.SELLER) || e.entry('p0').role !== ROLE.BUYER) return 'the role changed after the declaration';
-    e.update(500); return eq(e.volume, 1, 'trade after the declaration');
+    runEngine(e, 1000); return eq(e.volume, 1, 'trade after the declaration');
+  });
+  t('Declaration: [FN] sellers start 1 step above the store sell line, buyers 10 steps below the store buy line', () => {
+    const { state, rng } = fresh(); const e = engineFor(state, rng, 'food', ['p0', 'p1'], true, true);
+    e.setRole('p0', ROLE.SELLER); e.setRole('p1', ROLE.BUYER);
+    return eq(`${e.entry('p0').price}/${e.entry('p1').price}`, '51/15', 'start lines (food: store 15 / 50, bottom 15)');
   });
   t('Declaration: snapshot / restore in the middle of the declaration resumes the auction identically (AI included)', () => {
     const mk = () => {
       const { state, rng } = fresh('decl'); setInv(state, 'p1', 'food', 9); setInv(state, 'p2', 'food', 0);
-      const e = new AuctionEngine({ market: AuctionEngine.fungibleMarket(RESOURCE_DEFS.food), state, rng, colonists: ['p0', 'p1', 'p2', 'p3'], declareMs: 5000 });
+      const e = new AuctionEngine({ market: AuctionEngine.fungibleMarket(RESOURCE_DEFS.food), state, rng, colonists: ['p0', 'p1', 'p2', 'p3'] });
       const brains = {}; state.players.forEach((p) => { brains[p.id] = AISystem.createBrain(state, rng, p); });
       return { state, rng, e, brains };
     };
@@ -667,67 +706,93 @@ function runSelfTests() {
     let { state, rng } = fresh(); setInv(state, 'p1', 'food', 5); setCash(state, 'p2', 3000); setCash(state, 'p3', 500);
     let e = engineFor(state, rng, 'food', ['p1', 'p2', 'p3']);
     e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 40); e.setRole('p2', ROLE.BUYER); e.setPrice('p2', 40); e.setRole('p3', ROLE.BUYER); e.setPrice('p3', 40);
-    e.update(500); if (!e.trades[0] || e.trades[0].buyer !== 'p3') return `buyer tie won by ${e.trades[0] && e.trades[0].buyer}`;
+    runEngine(e, 1000); if (!e.trades[0] || e.trades[0].buyer !== 'p3') return `buyer tie won by ${e.trades[0] && e.trades[0].buyer}`;
     ({ state, rng } = fresh()); setInv(state, 'p1', 'food', 5); setInv(state, 'p2', 'food', 5); setCash(state, 'p1', 3000);
     e = engineFor(state, rng, 'food', ['p1', 'p2', 'p3']);
     e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 40); e.setRole('p2', ROLE.SELLER); e.setPrice('p2', 40); e.setRole('p3', ROLE.BUYER); e.setPrice('p3', 40);
-    e.update(500); if (!e.trades[0] || e.trades[0].seller !== 'p2') return `seller tie won by ${e.trades[0] && e.trades[0].seller}`;
+    runEngine(e, 1000); if (!e.trades[0] || e.trades[0].seller !== 'p2') return `seller tie won by ${e.trades[0] && e.trades[0].seller}`;
     ({ state, rng } = fresh()); setInv(state, 'p1', 'food', 5);
     e = engineFor(state, rng, 'food', ['p1', 'p3'], true);
     const ask = e.entry('store-s').price;
     e.setRole('p1', ROLE.SELLER); e.setPrice('p1', ask); e.setRole('p3', ROLE.BUYER); e.setPrice('p3', ask);
-    e.update(500); return e.trades[0] && e.trades[0].seller === 'p1' ? true : `store tie: ${JSON.stringify(e.trades)}`;
+    runEngine(e, 1000); return e.trades[0] && e.trades[0].seller === 'p1' ? true : `store tie: ${JSON.stringify(e.trades)}`;
   });
-  t('Trade price: where the lines meet (the resting marker); same-tick fallback = rounded midpoint (PROVISIONAL)', () => {
-    let { state, rng } = fresh(); setInv(state, 'p1', 'food', 5);
-    let e = engineFor(state, rng, 'food', ['p0', 'p1']);
-    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 40); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 30);
-    e.update(100); e.setPrice('p0', 45); e.update(500);
-    if (!e.trades[0] || e.trades[0].price !== 40) return `buyer moving up must pay the resting ask: ${JSON.stringify(e.trades)}`;
-    ({ state, rng } = fresh()); setInv(state, 'p1', 'food', 5);
-    e = engineFor(state, rng, 'food', ['p0', 'p1']);
-    e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 41); e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 40);
-    const c0 = state.players[0].cash;
-    e.update(499); if (e.volume !== 0) return 'traded before 500 ms';
-    e.update(1); if (e.volume !== 1 || e.trades[0].price !== 41) return `midpoint ${e.trades[0] && e.trades[0].price}`;
-    if (state.players[0].cash !== c0 - 41 || state.players[0].inventory.food !== 5) return 'buyer balances';
+  t('Auction: [FN] a buyer stops at the lowest seller line (store sell line while it has stock), a seller at the highest buyer line (or the store buy line)', () => {
+    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 6); setCash(state, 'p0', 2000);
+    const e = engineFor(state, rng, 'food', ['p0', 'p1', 'p2'], true);
+    e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 200); if (e.entry('p0').price !== 50) return `buyer above the store ask: ${e.entry('p0').price}`;
+    e.setPrice('p0', 30); e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 45); e.setPrice('p0', 200);
+    if (e.entry('p0').price !== 45) return `buyer above a colonist seller: ${e.entry('p0').price}`;
+    e.setPrice('p0', 30); e.setPrice('p1', 0); if (e.entry('p1').price !== 30) return `seller below the highest buyer: ${e.entry('p1').price}`;
+    e.setRole('p2', ROLE.SELLER); e.setPrice('p0', 15); e.setPrice('p1', 0);
+    return eq(e.entry('p1').price, 15, 'seller stops at the store buy line');
+  });
+  t('Auction: [Atari code] continuous unit-by-unit transfer while the lines touch, one unit per 12, 12, 10, 8, 6, 4, 2, 2... BTU; breaking contact resets it', () => {
+    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 20); setCash(state, 'p0', 5000);
+    const e = engineFor(state, rng, 'food', ['p0', 'p1']);
+    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 40); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 60);
+    if (e.entry('p0').price !== 40) return `the buyer must stop on the seller line, got ${e.entry('p0').price}`;
+    const at = []; let clock = 0;
+    for (; clock < 5000; clock += 10) { const v = e.volume; e.update(10); if (e.volume > v) at.push(clock + 10); }
+    let cum = 0; const want = [12, 12, 10, 8, 6, 4, 2, 2, 2].map((btu) => { cum += fms(btu * 4); return cum; });
+    const off = at.slice(0, 9).map((ms, i) => ms - want[i]);
+    if (off.length < 9 || off.some((d) => d < 0 || d >= 10)) return `unit times ${at.slice(0, 9).join()} vs ${want.map(Math.round).join()}`;
+    if (!e.trades.every((tr) => tr.price === 40)) return 'units traded off the contact line';
+    if (e.contact.units !== e.volume) return `units traded counter ${e.contact.units}`;
+    e.setPrice('p0', 30); runEngine(e, 200); const v0 = e.volume; e.setPrice('p0', 60);
+    runEngine(e, Math.floor(fms(48) / 10) * 10 - 10); if (e.volume !== v0) return 'the cadence did not restart after the contact broke';
+    runEngine(e, 20); if (e.volume !== v0 + 1) return 'no unit after a fresh 12 BTU';
     return audited(state);
   });
-  t('Auction: crossing that breaks resets the 500 ms timer', () => {
-    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 5);
-    const e = engineFor(state, rng, 'food', ['p0', 'p1']);
-    e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 41); e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 40);
-    e.update(400); e.setPrice('p0', 30); e.update(100); e.setPrice('p0', 41); e.update(400);
-    return eq(e.volume, 0, 'volume after interruption');
-  });
-  t('Auction: markers separate 2 steps after a trade (PROVISIONAL, see README)', () => {
-    const { state, rng } = fresh(); setInv(state, 'p1', 'smithore', 5);
-    const e = engineFor(state, rng, 'smithore', ['p0', 'p1']);
-    e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 60); e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 60);
-    e.update(500);
-    if (e.volume !== 1) return 'no trade';
-    return e.entry('p0').price === 56 && e.entry('p1').price === 64 ? true : `markers ${e.entry('p0').price}/${e.entry('p1').price}`;
-  });
   t('Auction: highest bid wins', () => {
-    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 3);
-    const e = engineFor(state, rng, 'food', ['p0', 'p1', 'p2'], true);
-    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 20);
+    const { state, rng } = fresh(); setInv(state, 'p1', 'food', 6);
+    const e = engineFor(state, rng, 'food', ['p0', 'p1', 'p2']);
+    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 60);
     e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 50);
     e.setRole('p2', ROLE.BUYER); e.setPrice('p2', 60);
-    e.update(500);
+    runEngine(e, 1000);
     return eq(e.trades[0] && e.trades[0].buyer, 'p2', 'winner');
   });
-  t('Auction: the store sells only real stock and buys colonist surplus', () => {
-    const { state, rng } = fresh(); ResourceLedger.moveItem(state, 'food', 'store', 'nature', 8); setInv(state, 'p0', 'food', 4);
+  t('Auction: the store sells only real stock ("La botiga s\'ha quedat sense estoc!") and buys colonist surplus at its buy line', () => {
+    let { state, rng } = fresh(); setCash(state, 'p0', 5000);
     let e = engineFor(state, rng, 'food', ['p0', 'p1'], true);
-    e.setRole('p1', ROLE.BUYER); e.setPrice('p1', 120); e.update(600);
-    if (e.volume !== 0) return 'the store sold with empty stock';
+    e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 999); runEngine(e, 8000);
+    if (state.store.stock.food !== 0 || state.players[0].inventory.food !== 12) return `bought ${state.players[0].inventory.food - 4}, store left ${state.store.stock.food}`;
+    if (!e.trades.every((tr) => tr.price === 50 && tr.seller === 'store')) return 'store sales off its sell line';
+    if (!e.notice || e.notice.kind !== 'store_dry') return `notice ${JSON.stringify(e.notice)}`;
+    if (!e.ended) { e.setPrice('p0', 300); if (e.entry('p0').price !== 300) return 'with the store dry a buyer may go above its line'; }
+    ({ state, rng } = fresh()); setInv(state, 'p0', 'food', 4);
     e = engineFor(state, rng, 'food', ['p0', 'p1'], true);
-    e.setRole('p0', ROLE.SELLER); e.setPrice('p0', 15); e.update(600);
-    return e.volume >= 1 && state.store.stock.food >= 1 ? audited(state) : 'the store did not buy';
+    e.setRole('p0', ROLE.SELLER); e.setPrice('p0', 0); runEngine(e, 2000);
+    return e.volume >= 1 && e.trades[0].price === 15 && state.store.stock.food >= 9 ? audited(state) : `the store did not buy: ${JSON.stringify(e.trades)}`;
+  });
+  t('Auction: a buyer without the money does not trade ("El comprador no té diners")', () => {
+    const { state, rng } = fresh(); setCash(state, 'p0', 45);
+    const e = engineFor(state, rng, 'food', ['p0'], true);
+    e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 999); runEngine(e, 3000);
+    return e.volume === 0 && e.notice && e.notice.kind === 'no_cash' ? audited(state) : `volume ${e.volume}, notice ${JSON.stringify(e.notice)}`;
+  });
+  t('Critical level: [Atari code] food = next round\'s need (round 12: 0), energy = non-energy RUCs + 1, smithore none', () => {
+    const { state } = fresh(); const p = state.players[1]; develop(state, 'p1', 0, 'food'); develop(state, 'p1', 2, 'smithore'); develop(state, 'p1', 3, 'energy');
+    const c = (turn) => { state.turn = turn; return ['food', 'energy', 'smithore'].map((r) => ConsumptionSystem.criticalLevel(state, p, r)).join('/'); };
+    const got = [1, 3, 4, 8, 11, 12].map(c).join(' ');
+    return eq(got, '3/3/0 3/3/0 4/3/0 5/3/0 5/3/0 0/3/0', 'critical levels');
+  });
+  t('Critical level: [Atari code] Standard computers stop selling at it ("Venedor al nivell crític!"), humans may sell below; Beginner blocks everyone', () => {
+    const { state, rng } = fresh(); state.turn = 1; setInv(state, 'p0', 'food', 5); setInv(state, 'p1', 'food', 5);
+    const e = engineFor(state, rng, 'food', ['p0', 'p1'], true);
+    e.setRole('p0', ROLE.SELLER); e.setRole('p1', ROLE.SELLER); e.setPrice('p0', 0); e.setPrice('p1', 0);
+    let seen = false; for (let k = 0; k < 12000 && !e.ended; k += 10) { e.update(10); if (e.notice && e.notice.kind === 'critical' && e.notice.id === 'p1') seen = true; }
+    if (state.players[1].inventory.food !== 3) return `computer sold down to ${state.players[1].inventory.food}`;
+    if (state.players[0].inventory.food !== 0) return `human kept ${state.players[0].inventory.food}`;
+    if (!seen) return 'no critical-level notice';
+    const b = fresh('crit', 'beginner'); b.state.turn = 2;
+    const e2 = engineFor(b.state, b.rng, 'food', ['p0'], true);
+    e2.setRole('p0', ROLE.SELLER); e2.setPrice('p0', 0); runEngine(e2, 30000);
+    return eq(b.state.players[0].inventory.food, 3, 'Beginner human food after selling');
   });
   t('Auction: blocked without cash or stock, state untouched (atomic)', () => {
-    const { state, rng } = fresh(); state.players[0].cash = 10; state.players[1].inventory.food = 1;
+    const { state, rng } = fresh(); state.players[0].cash = 10; state.players[1].inventory.food = 5;
     const e = engineFor(state, rng, 'food', ['p0', 'p1']);
     const snap = JSON.stringify(state);
     const b = e.entry('p0'); const s = e.entry('p1'); b.price = 50; s.price = 30;
@@ -739,40 +804,116 @@ function runSelfTests() {
     if (r.ok || r.reason !== 'no_stock') return `stock block: ${JSON.stringify(r)}`;
     return JSON.stringify(state) === snap2 && snap !== snap2 ? true : 'state changed by a blocked trade';
   });
-  t('Auction: ends on time, when all are out, and with no possible deal', () => {
-    let { state, rng } = fresh(); let e = engineFor(state, rng, 'food', ['p0', 'p1']);
-    e.setRole('p0', ROLE.BUYER); for (let i = 0; i < 46; i++) e.update(1000);
-    if (e.endReason !== 'time') return `reason ${e.endReason}`;
+  t('Auction: ends when the time units run out, when all are out, and with no possible deal (PROVISIONAL early ends)', () => {
+    let { state, rng } = fresh(); setInv(state, 'p1', 'food', 5); let e = engineFor(state, rng, 'food', ['p0', 'p1']);
+    e.setRole('p0', ROLE.BUYER); e.setRole('p1', ROLE.SELLER); runEngine(e, 11400);
+    if (e.ended) return `ended early: ${e.endReason}`;
+    runEngine(e, 200); if (e.endReason !== 'time') return `reason ${e.endReason}`;
     ({ state, rng } = fresh()); e = engineFor(state, rng, 'food', ['p0', 'p1']);
-    e.update(2900); if (e.ended) return 'ended too early (all out)';
-    e.update(200); if (e.endReason !== 'all_out') return `all_out ${e.endReason}`;
+    runEngine(e, 2900); if (e.ended) return 'ended too early (all out)';
+    runEngine(e, 200); if (e.endReason !== 'all_out') return `all_out ${e.endReason}`;
     ({ state, rng } = fresh()); state.players.forEach((p) => { p.inventory.food = 0; }); e = engineFor(state, rng, 'food', ['p0', 'p1']);
-    e.setRole('p0', ROLE.BUYER); e.update(4900); if (e.ended) return 'no_ops too early';
-    e.update(200); return eq(e.endReason, 'no_ops', 'no possible deal');
+    e.setRole('p0', ROLE.BUYER); runEngine(e, 4900); if (e.ended) return 'no_ops too early';
+    runEngine(e, 200); return eq(e.endReason, 'no_ops', 'no possible deal');
   });
   t('Auction: a 4th resource needs no engine change', () => {
     const { state, rng } = fresh();
     const def = { id: 'gizmo', label: 'Gizmo', basePrice: 40, minPrice: 10, maxPrice: 90, auctionStep: 1 };
     state.ext.items.gizmo = 0; state.store.stock.gizmo = 0; state.initialTotals.items.gizmo = 0;
     setInv(state, 'p0', 'gizmo', 3); setCash(state, 'p1', 200);
-    const e = new AuctionEngine({ market: AuctionEngine.fungibleMarket(def), state, rng, colonists: ['p0', 'p1'], withStore: false });
-    e.setRole('p0', ROLE.SELLER); e.setPrice('p0', 30); e.setRole('p1', ROLE.BUYER); e.setPrice('p1', 50); e.update(500);
+    const e = new AuctionEngine({ market: AuctionEngine.fungibleMarket(def), state, rng, colonists: ['p0', 'p1'], withStore: false, declare: false });
+    e.setRole('p0', ROLE.SELLER); e.setPrice('p0', 30); e.setRole('p1', ROLE.BUYER); e.setPrice('p1', 50); runEngine(e, 1000);
     return e.volume === 1 && state.players[1].inventory.gizmo === 1 && ResourceLedger.audit(state).length === 0 ? true : 'gizmo trade failed';
   });
-  t('Auction: generic single lot (future land) transfers ownership', () => {
+  t('Auction: a generic single lot transfers ownership', () => {
     const { state, rng } = fresh(); const plot = state.plots[0]; plot.ownerId = 'p1'; state.players[1].plots.push(plot.id);
     const market = { id: 'land', label: 'Terra', minPrice: 50, maxPrice: 500, step: 5, basePrice: 300, kind: 'plot',
       createLot: (st, sellerId) => ({ id: `plot:${plot.id}`, kind: 'plot', quantity: 1, sellerId, transferable: plot.ownerId === sellerId, getValue: () => 300,
         transfer: (s2, toId) => { plot.ownerId = toId; return true; } }) };
-    const e = new AuctionEngine({ market, state, rng, colonists: ['p0', 'p1'], withStore: false });
-    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 200); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 250); e.update(500);
+    const e = new AuctionEngine({ market, state, rng, colonists: ['p0', 'p1'], withStore: false, declare: false });
+    e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 200); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 250); runEngine(e, 1000);
     return e.volume === 1 && plot.ownerId === 'p0' ? true : 'plot did not change owner';
   });
-  t('Phase B stays off: flags false, crystite disabled and not auctioned, hidden deposits kept', () => {
+  t('Phase B stays off (crystite, wampus); land auctions are on; crystite disabled and not auctioned, hidden deposits kept', () => {
     const ids = enabledResources().map((d) => d.id).join();
     if (ids !== 'food,energy,smithore') return `enabled ${ids}`;
     if (RESOURCE_DEFS.crystite.enabled || !('hiddenDeposit' in fresh().state.plots[0])) return 'crystite / hiddenDeposit';
-    return FEATURES.crystite === false && FEATURES.wampus === false && FEATURES.landAuctions === false ? true : 'a Phase B flag is on';
+    return FEATURES.crystite === false && FEATURES.wampus === false && FEATURES.landAuctions === true ? true : 'feature flags';
+  });
+
+  /* ---------- Batch 4: land auctions ---------- */
+  /** Runs a land auction for `ms` (or until `until()`), in 10 ms steps. */
+  const runLA = (state, rng, la, ms, until = null) => { for (let k = 0; k < ms && !la.done && !(until && until()); k += 10) LandAuction.update(state, rng, la, 10); };
+  t('Land auction: [Atari code] colony plots per round = 1 + variation: 0 16.2 %, 1 67.7 %, 2 16.1 %, 3 0.1 %; capped by free plots; none in Beginner', () => {
+    const rng = new SeededRNG('lac'); const { state } = fresh(); const n = [0, 0, 0, 0];
+    for (let i = 0; i < 20000; i++) n[LandAuction.colonyCount(state, rng)]++;
+    const pct = n.map((x) => x / 200);
+    if (Math.abs(pct[0] - 16.2) > 1.2 || Math.abs(pct[1] - 67.7) > 1.5 || Math.abs(pct[2] - 16.1) > 1.2 || pct[3] > 0.4) return `shares ${pct.join('/')}`;
+    state.plots.filter((p) => Plot.claimable(p)).slice(1).forEach((p) => LandGrantSystem.assign(state, 'p1', p.id));
+    for (let i = 0; i < 300; i++) if (LandAuction.colonyCount(state, rng) > 1) return 'more lots than free plots';
+    const b = fresh('lab', 'beginner');
+    for (let i = 0; i < 300; i++) if (LandAuction.colonyCount(b.state, rng)) return 'land auction in Beginner';
+    return true;
+  });
+  t('Land auction: [Atari code] bids start at $160, the next lot $60 below the previous price; no bid -> start/2 + 52 and the colony set ends; next round starts at the set average - 60', () => {
+    const { state, rng } = fresh('lap'); state.turn = 2; setCash(state, 'p0', 2000);
+    const la = LandAuction.create(state, rng, [], { colony: 3 });
+    if (la.lot.start !== 160 || la.lot.sellerId !== 'colony') return `first lot ${JSON.stringify(la.lot)}`;
+    runLA(state, rng, la, 10000, () => la.stage === 'bid');
+    LandAuction.setBid(state, la, 'p0', 201);
+    if (la.bids.p0.price !== 200) return `$4 steps from the start: ${la.bids.p0.price}`;
+    const plotA = la.lot.plotId;
+    runLA(state, rng, la, 30000, () => la.stage === 'result');
+    if (!la.result.sold || la.result.buyer !== 'p0' || la.result.price !== 200 || state.plots[plotA].ownerId !== 'p0') return `lot 1 ${JSON.stringify(la.result)}`;
+    runLA(state, rng, la, 10000, () => la.stage === 'bid');
+    if (la.lot.start !== 140) return `second lot starts at ${la.lot.start}`;
+    runLA(state, rng, la, 60000);
+    if (!la.done || la.prices.join() !== '200,122' || la.sold.length !== 1) return `set ${la.prices.join()} sold ${la.sold.length} done ${la.done}`;
+    if (state.landAuction.lastAvg !== 161) return `average ${state.landAuction.lastAvg}`;
+    state.turn = 3; const next = LandAuction.create(state, rng, [], { colony: 1 });
+    return eq(next.lot && next.lot.start, 101, 'next round start');
+  });
+  t('Land auction: highest bid at time-out wins, a tie goes to the poorer colonist, nobody bids past their cash; colony sale money goes to the store', () => {
+    const { state, rng } = fresh('lat'); state.turn = 2; setCash(state, 'p0', 900); setCash(state, 'p2', 900); setCash(state, 'p3', 250);
+    LandGrantSystem.assign(state, 'p2', 0);
+    const la = LandAuction.create(state, rng, [], { colony: 1 }); const plotId = la.lot.plotId;
+    runLA(state, rng, la, 10000, () => la.stage === 'bid');
+    LandAuction.setBid(state, la, 'p3', 400); if (la.bids.p3.price !== 248) return `bid past cash ${la.bids.p3.price}`;
+    LandAuction.setBid(state, la, 'p0', 300); LandAuction.setBid(state, la, 'p2', 300);
+    const bank = state.bank.cash;
+    runLA(state, rng, la, 30000, () => la.stage === 'result');
+    if (!la.result.sold || la.result.buyer !== 'p0') return `tie won by ${la.result.buyer} (p2 owns a plot, so p0 is poorer)`;
+    if (state.players[0].cash !== 600 || state.bank.cash !== bank + 300 || state.plots[plotId].ownerId !== 'p0' || !state.players[0].plots.includes(plotId)) return 'transfer';
+    return audited(state);
+  });
+  t('Land auction: plots marked at the land office go first with the owner as seller (money to the owner), the mark is cleared; an unsold plot stays', () => {
+    const { state, rng } = fresh('lam'); state.turn = 3; LandGrantSystem.assign(state, 'p0', 10); LandGrantSystem.assign(state, 'p0', 12);
+    LandOffice.mark(state, 'p0', 10); setCash(state, 'p1', 2000);
+    const la = LandAuction.create(state, rng, [], { colony: 0 });
+    if (!la.lot || la.lot.plotId !== 10 || la.lot.sellerId !== 'p0' || la.lot.start !== 160) return `lot ${JSON.stringify(la.lot)}`;
+    runLA(state, rng, la, 10000, () => la.stage === 'bid');
+    if (la.bids.p0) return 'the seller must not bid on its own plot';
+    LandAuction.setBid(state, la, 'p1', 180); const c0 = state.players[0].cash;
+    runLA(state, rng, la, 60000);
+    if (state.plots[10].ownerId !== 'p1' || state.players[0].plots.includes(10) || state.players[0].cash !== c0 + 180) return 'player sale';
+    if (LandOffice.forSale(state).length) return 'mark not cleared';
+    LandOffice.mark(state, 'p0', 12); const la2 = LandAuction.create(state, rng, [], { colony: 0 });
+    runLA(state, rng, la2, 60000);
+    if (state.plots[12].ownerId !== 'p0' || la2.result.sold || LandOffice.forSale(state).length) return 'unsold plot';
+    return audited(state);
+  });
+  t('Land auction: computers bid by their land valuation ($4 steps above the start) and never past it or their cash', () => {
+    const { state, rng } = fresh('lai'); state.turn = 2;
+    const la = LandAuction.create(state, rng, ['p1', 'p2', 'p3'], { colony: 1 }); const plot = state.plots[la.lot.plotId];
+    const vals = ['p1', 'p2', 'p3'].map((id) => la.ai[id].max);
+    if (vals.some((v) => !Number.isInteger(v) || v < 0)) return `valuations ${vals}`;
+    runLA(state, rng, la, 60000, () => la.stage === 'result');
+    const bids = ['p1', 'p2', 'p3'].map((id) => la.bids[id].price);
+    if (bids.some((b, i) => b > Math.max(vals[i], la.lot.start - 40))) return `bids ${bids} past valuations ${vals}`;
+    if (bids.some((b) => (b - la.lot.start) % 4)) return 'off the $4 grid';
+    const best = Math.max(...vals);
+    if (best >= la.lot.start && (!la.result.sold || plot.ownerId === null)) return `nobody bought though valuations were ${vals}`;
+    return audited(state);
   });
 
   /* ---------- P2.8 land ---------- */
@@ -1201,10 +1342,10 @@ function runSelfTests() {
   });
 
   /* ---------- saves, conservation, determinism, engine ---------- */
-  t('Save: schema 5 round trip keeps state (level, species, land sales, store prices, event bag) and PRNG; schemas 1-4 (old rules) and corrupt saves are refused', () => {
-    if (CONFIG.SCHEMA_VERSION !== 5) return `schema ${CONFIG.SCHEMA_VERSION}`;
+  t('Save: schema 6 round trip keeps state (level, species, land sales, land-auction prices, store prices, event bag) and PRNG; schemas 1-5 (old rules) and corrupt saves are refused', () => {
+    if (CONFIG.SCHEMA_VERSION !== 6) return `schema ${CONFIG.SCHEMA_VERSION}`;
     const { state, rng } = fresh('save'); rng.next(); rng.next();
-    state.turn = 4; state.phase = 'DEVELOPMENT'; state.storePrice.food = 33; state.events.bag.pirates = 1; state.events.used[13] = 1;
+    state.turn = 4; state.phase = 'DEVELOPMENT'; state.storePrice.food = 33; state.events.bag.pirates = 1; state.events.used[13] = 1; state.landAuction.lastAvg = 222;
     const text = SaveSystem.serialize(state, rng);
     const back = SaveSystem.deserialize(text);
     if (back.incompatible) return 'incompatible';
@@ -1214,7 +1355,8 @@ function runSelfTests() {
     if (back.state.storePrice.food !== 33) return 'store price lost';
     if (back.state.events.bag.pirates !== 1 || back.state.events.used[13] !== 1) return 'event bag / used flags lost';
     if (back.state.level !== 'standard' || back.state.players[0].species !== 'mechtron' || !Array.isArray(back.state.landSales)) return 'level / species / land sales lost';
-    for (const v of [1, 2, 3, 4]) {
+    if (back.state.landAuction.lastAvg !== 222) return 'land-auction price lost';
+    for (const v of [1, 2, 3, 4, 5]) {
       const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: v, turn: 3 }));
       if (!old.incompatible || old.reason !== 'old_rules') return `schema ${v}: ${JSON.stringify(old)}`;
     }
@@ -1283,6 +1425,30 @@ function runSelfTests() {
     for (const G of [g, k]) for (let i = 0; i < 500; i++) G.tick(50);
     if (JSON.stringify(g.rt.auction.engine.snapshot()) !== JSON.stringify(k.rt.auction.engine.snapshot())) return 'the auction diverged after resuming';
     return same(g, k) ? audited(g.state) : 'state diverged after resuming the auction';
+  });
+  t('Game: LAND_AUCTION follows LAND_GRANT (Standard; skipped in Beginner); a save taken mid-land-auction resumes exactly', () => {
+    const ids = mkGame().turns.phases.map((p) => p.id);
+    if (ids.indexOf('LAND_AUCTION') !== ids.indexOf('LAND_GRANT') + 1) return ids.join();
+    const tickUntil = (G, pred, max = 20000) => { for (let i = 0; i < max && !pred(); i++) { if (G.turns.phaseData && G.turns.phaseData.skippable) G.skipPhase(); G.tick(50); } return pred(); };
+    const b = mkGame(); b.newGame({ seed: 'lab-game', level: 'beginner' });
+    if (!tickUntil(b, () => b.turns.phase === 'DEVELOPMENT')) return `beginner stuck in ${b.turns.phase}`;
+    if (b.state.landAuction.lastAvg !== null) return 'a land auction ran in Beginner';
+    const copy = (G) => { G.snapshotPhase(); const H = mkGame(); H.resume(SaveSystem.deserialize(SaveSystem.serialize(G.state, G.rng))); return H; };
+    const same = (A, B) => JSON.stringify(A.state, noSavedAt) === JSON.stringify(B.state, noSavedAt) && A.rng.getState() === B.rng.getState();
+    for (const seed of ['la-1', 'la-2', 'la-3', 'la-4', 'la-5']) {
+      const g = mkGame(); g.newGame({ seed });
+      if (!tickUntil(g, () => g.turns.phase === 'LAND_AUCTION' || g.turns.phase === 'DEVELOPMENT')) return `stuck in ${g.turns.phase}`;
+      const la = g.turns.phaseData.landAuction;
+      if (g.turns.phase !== 'LAND_AUCTION' || !la || la.done) continue; // 0 colony plots this round (16 %): try another seed
+      if (!tickUntil(g, () => la.stage === 'bid' && la.units < 40)) return 'the land auction never reached the bidding';
+      g.input.keys.add('ArrowUp'); for (let i = 0; i < 60; i++) g.tick(50); g.input.keys.delete('ArrowUp');
+      if (!(g.turns.phaseData.landAuction.bids.p0.price >= la.lot.start)) return `the human could not bid: ${JSON.stringify(la.bids.p0)}`;
+      const h = copy(g);
+      if (h.turns.phase !== 'LAND_AUCTION' || !same(g, h)) return 'not resumed in the land auction';
+      for (const G of [g, h]) tickUntil(G, () => G.turns.phase === 'DEVELOPMENT');
+      return same(g, h) ? audited(g.state) : 'the land auction diverged after resuming';
+    }
+    return 'no seed with a land auction in round 1';
   });
   t('Game: a full 12-turn autopilot game ends; the same seed gives the same game; ledger, RUCs and result consistent', () => {
     const play = (seed) => { const g = mkGame(); g.autopilot = true; g.newGame({ seed, level: 'standard' }); for (let n = 0; n < 400000 && g.state.phase !== 'GAME_OVER'; n++) g.tick(50); return g; };

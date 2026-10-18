@@ -175,7 +175,7 @@ const DevWalk = {
   },
   /**
    * [manual][C64] land office (Standard): first visit "MARK PLOT TO SELL THEN COME BACK.", then the button over one of your plots
-   * marks it, and back at the office it is "MARKED FOR SALE." for the next land auction (LandOffice; the auction is Batch 4).
+   * marks it, and back at the office it is "MARKED FOR SALE." for the next land auction (LandOffice, LandAuction).
    * [PROVISIONAL] the development clock keeps running meanwhile ([manual]: it stops while you are at the office).
    */
   landOffice(state, w) {

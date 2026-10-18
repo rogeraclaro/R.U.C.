@@ -24,9 +24,11 @@ const GameState = {
       // bag: roundEventsProb tickets left; rank: ordersPlayer (last Status Summary, ties at random); after: drawn event waiting for
       // the production display.
       events: { used: INDIVIDUAL_EVENT_IDS.map(() => 0), bag: Object.fromEntries(PLANET_EVENT_IDS.map((id) => [id, EVENT_DEFS[id].tickets])), rank: null, after: null },
-      // Plots marked for sale at the land office ({ pid, plotId, turn }); [manual] auctioned next round (land auctions: Batch 4).
+      // Plots marked for sale at the land office ({ pid, plotId, turn }); [manual] auctioned in the next round's land auction.
       landSales: [],
-      flags: { landAuctions: false }, savedAt: 0, createdAt: 0
+      // [Atari code] the last land-auction set's average price (the next set starts $60 below it; null = none yet, start at $160).
+      landAuction: { lastAvg: null },
+      savedAt: 0, createdAt: 0
     };
     Object.keys(RESOURCE_DEFS).forEach((k) => { state.ext.items[k] = 0; state.storePrice[k] = RESOURCE_DEFS[k].basePrice; });
     state.initialTotals = { cash: players.reduce((s, p) => s + p.cash, 0), items: {} };

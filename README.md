@@ -2,7 +2,7 @@
 
 Reinterpretació de **M.U.L.E.** (Dani Bunten, 1983): un jugador contra tres rivals IA (Bran, Vela i Nox, tots Mechtrons),
 12 torns (6 al nivell Principiant), subhasta contínua en temps real. Fase A ajustada a les regles del M.U.L.E. original de Commodore 64 (joc «Standard» sense
-crystite ni subhastes de terra). HTML, CSS i JavaScript vanilla amb Canvas 2D; cap dependència.
+crystite), amb subhastes de terra. HTML, CSS i JavaScript vanilla amb Canvas 2D; cap dependència.
 
 ## Com obrir-lo
 
@@ -24,13 +24,15 @@ Funciona sense connexió. No hi ha CDN, npm, bundler ni IA en temps d'execució.
   els antics valors «Colònia»).
 - Principiant ([codi Atari]): 8 menjar i 4 energia per colon; botiga 16 menjar / 16 energia / 0 smithore i 25 RUCs, i cada torn torna a
   0 smithore i 25 RUCs; sense variació de collita; smithore fix a 50; unitat de temps +2 BTU (×9/7); cursor de terra a 32 fotogrames per
-  parcel·la; un RUC no fuig mai per prémer al lloc equivocat (només avisa); no es pot vendre terra. **Pendent (lot 4)**: el temps de
-  subhasta del Principiant i el bloqueig de tots els venedors al nivell crític.
+  parcel·la; un RUC no fuig mai per prémer al lloc equivocat (només avisa); no es pot vendre terra ni hi ha subhastes de terra; a les
+  subhastes cada unitat de temps dura 5/3 de l'Estàndard (ATU 50 en lloc de 30; el doble al primer torn) i **cap** venedor (tampoc l'humà)
+  no pot vendre per sota del seu nivell crític.
 
 ## El torn
 
 0. **Inici** ([C64]): el primer torn obre amb «Aterreu al planeta Irata. La nau tornarà d'aquí a 12 mesos.» (6 al Principiant).
 1. **Adjudicació de terra**: cursa en temps real, una sola passada.
+   Després, **subhasta de terres** (Estàndard): les parcel·les marcades a l'oficina de terres i 0–3 parcel·les de la colònia (vegeu més avall).
 2. **Desenvolupament**, un colon rere l'altre per ordre de patrimoni (del líder a l'últim; al revés si al corral queden 7 RUCs o menys).
    El temps de cada colon depèn del menjar que té a l'inici del seu torn (vegeu més avall).
    Abans del torn de cada colon (humà o IA) hi ha un 27,5 % (22/80) d'**esdeveniment personal**, un dels 22 de l'original; el text
@@ -38,7 +40,8 @@ Funciona sense connexió. No hi ha CDN, npm, bundler ni IA en temps d'execució.
 3. **Esdeveniment planetari**: un per torn als torns 1–11, tret d'una bossa sense reposició; al torn 12, «La nau ha tornat!». Taques solars,
    pluja àcida, terratrèmol, meteorit i radiació actuen abans de la producció; plaga, pirates i incendi, després de mostrar-la.
 4. **Producció i estat**: consum, malbaratament de la reserva i collita nova (pantalla «Estat del torn»).
-5. **Subhastes**: smithore → menjar → energia. Cadascuna té una **declaració** cronometrada (comprador / venedor / fora) i després el rol queda fix.
+5. **Subhastes**: smithore → menjar → energia. Cadascuna té una **declaració** cronometrada (comprador / venedor / fora) i després el rol queda fix
+   (vegeu «Subhastes» més avall).
 6. **Informe del torn**: la botiga recalcula els preus per oferta i demanda i fabrica RUCs amb el smithore que té (2 per RUC, fins a
    14 al corral, disponibles el torn següent).
 
@@ -78,7 +81,7 @@ alenteixen ([codi Atari] 6 / 14 / 21 fotogrames per pas: plana / riu / muntanya)
   200 torn 12) + (aleatori 0..255 mod (2 × unitats que queden)); si la suma passa de 255, en cobres 250. «Has guanyat N cr jugant!».
   Amb un RUC no hi pots entrar: «No s'hi admeten RUCs.» (també a l'oficina de terres).
 - **Oficina de terres** (Estàndard): «Marca la parcel·la per vendre i torna.»; prem Acció sobre una parcel·la teva i torna a l'oficina:
-  queda marcada per vendre («EN VENDA») a la propera subhasta de terres (la subhasta és del lot 4; ara només es desa i es mostra).
+  queda marcada per vendre («EN VENDA») a la subhasta de terres del torn següent, on tu ets el venedor.
 - **Instal·lar**: surt del poble per una vora oberta, camina fins a la **casa** —ara tota la parcel·la teva, no només el centre— i
   prem **Acció**. No és instantani: el RUC puja, se li afegeix l'especialització i torna a baixar (uns 2 s) abans de quedar instal·lat;
   mentrestant no es pot caminar ni tornar a prémer Acció. Si a la parcel·la ja hi havia un RUC, ara et segueix aquell.
@@ -101,7 +104,9 @@ alenteixen ([codi Atari] 6 / 14 / 21 fotogrames per pas: plana / riu / muntanya)
 | Acció (instal·lar / retirar / marcar parcel·la per vendre) | botó «Acció» | `Enter` o `Espai` |
 | Acabar el torn de desenvolupament | botó «Acabar» (avisa si el RUC fugirà) | `Tab` fins al botó i `Enter` |
 | Subhasta: declaració | botons COMPRADOR / VENEDOR / FORA, o toc a la meitat esquerra / dreta del teu carril | `↑`/`→` venedor, `↓`/`←` comprador, `Espai` fora |
-| Subhasta: preu (després de declarar) | arrossega al teu carril, control vertical o roda | `↑` / `↓` (mantén-ho premut; `Maj` = ×3) |
+| Subhasta: preu (després de declarar) | arrossega al teu carril, control vertical, roda o botons «Preu ▲/▼» | `↑` / `↓` (mantén-ho premut; `Maj` = ×3) |
+| Subhasta de terres: oferta | arrossega al teu carril, roda o botons «Puja ▲ / Baixa ▼» (16 cr) | `↑` / `↓` (mantén-ho premut; `Maj` = ×3) |
+| Subhasta de terres: tancar el resultat | botó «Continuar» | `Enter` o `Espai` |
 | Pausa | botó Pausa | `Esc` (atura tots els rellotges) |
 
 Les opcions **So** i **Reduir moviment** són al menú de pausa (i So també al HUD).
@@ -115,15 +120,15 @@ rellotge del joc. A la pantalla final, **Repetir llavor** i **Nova llavor**. Amb
 
 ## Desat
 
-Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **5**: nivell, espècie, parcel·les en venda, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
+Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **6**: nivell, espècie, parcel·les en venda, preu de l'última subhasta de terres, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
 **Continuar** al títol reprèn a la fase desada.
 
 «Desa i surt al títol» (menú de pausa) escriu un desat exacte a les fases **represables**: cursa de terra, desenvolupament (posició, RUC que
-portes, rellotge, ordre i esdeveniments ja sortejats) i subhastes (declaració o negociació, marcadors, IA). A la resta de fases es manté
+portes, rellotge, ordre i esdeveniments ja sortejats), subhastes de terres (parcel·la, ofertes, temps, IA) i subhastes de béns (declaració o negociació, marcadors, contacte, IA). A la resta de fases es manté
 l'últim desat de frontera, perquè tornar-hi a mitja fase podria aplicar-ne els efectes dues vegades. La liquidació del torn queda desada
 a l'estat (`settlement`) i no es torna a executar mai.
 
-**Desats antics:** un desat dels esquemes 1 a 4 (regles anteriors: estocs inicials, preus, temps, patrimoni, esdeveniments, dificultats) **no es migra**: el joc avisa al títol que
+**Desats antics:** un desat dels esquemes 1 a 5 (regles anteriors: estocs inicials, preus, temps, patrimoni, esdeveniments, dificultats, subhastes) **no es migra**: el joc avisa al títol que
 és d'una versió anterior amb unes altres regles i l'esborra. Un desat malmès també s'avisa. Cap desat incompatible s'accepta en silenci.
 
 ## Paràmetres d'URL (proves i depuració)
@@ -143,9 +148,9 @@ ruc/
 │   ├── core/         config.js (CONFIG, FEATURES, enums, RESOURCE_DEFS, EVENT_DEFS…), rng.js, assets.js
 │   ├── state/        models de dades: Plot, PlayerState, StoreState, ResourceLedger + RucAudit, GameState
 │   ├── systems/      lògica pura: torn, botiga, terra (i oficina de terres), producció, consum, liquidació, esdeveniments,
-│   │                 puntuació, pub, desat, subhasta, IA, ordre i caminada de desenvolupament (poble)
+│   │                 puntuació, pub, desat, subhasta, subhasta de terres, IA, ordre i caminada de desenvolupament (poble)
 │   ├── ui/           hud.js (colors, formats, Hud), species-art.js, overlays.js, input.js, audio.js, renderer.js
-│   ├── screens/      title, setup, map, production, report, auction, gameover
+│   ├── screens/      title, setup, map, production, report, auction, land-auction, gameover
 │   ├── tests.js      runSelfTests (?test=1)
 │   └── game.js       Game + arrencada
 ├── README.md
@@ -221,6 +226,42 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 - Reclamacions simultànies (mateix pas de 10 ms): guanya qui té **menys patrimoni net**; a igualtat, l'ordre del torn anterior rotat una posició
   (torn 1: p0, p1, p2, p3). Qui perd conserva el dret a reclamar.
 
+## Subhastes
+
+**Temps** ([C64], PAL 50,125 Hz; [codi Atari]): la barra de temps compta unitats. Declaració: **31 unitats de 7 fotogrames** (≈ 4,3 s,
+«Declareu-vos compradors o venedors»; al C64 «PUSH STICK TO DECLARE AS BUYER OR SELLER»), amb «La botiga té N unitats». Negociació:
+**72 unitats** de **8 fotogrames** (≈ 11,5 s) si ningú no negocia; **60 fotogrames** per unitat mentre un comprador i un venedor es toquen
+(el temps passa més a poc a poc, mesurat al C64; el codi Atari atura el rellotge); **30 fotogrames** (l'ATU sencera del codi Atari) mentre
+l'humà mou el marcador. Al Principiant cada unitat dura 5/3 (ATU 50), el doble al primer torn. Quan s'acaba: «La subhasta s'ha acabat».
+
+**Línies** ([codi Atari], [FN]): tots els marcadors (humà i IA) es mouen 1 cr cada 8 fotogrames. Els venedors comencen 1 pas per sobre del
+preu de venda de la botiga i els compradors 10 per sota del de compra. Un comprador no pot passar de la línia de venedor més baixa (la de la
+botiga, mentre tingui estoc) i un venedor no pot baixar de la línia de comprador més alta (o del preu de compra de la botiga).
+
+**Negociació contínua** ([codi Atari]): mentre una línia de comprador toca una de venedor, passa **una unitat** al preu on es toquen cada
+12, 12, 10, 8, 6, 4, 2, 2… BTU (de 4 fotogrames): cada cop més de pressa; si el contacte es trenca, torna a començar. Es mostra «N unitats
+negociades». La botiga ven al seu preu mentre tingui estoc («La botiga s'ha quedat sense estoc!»; aleshores el preu entre colons no té
+sostre) i compra al seu preu fins a 255 unitats. Un comprador sense prou diners no compra («El comprador no té diners»).
+
+**Nivell crític** (línia negra sobre la barra d'estoc de cada carril, com al C64): menjar = necessitat del torn següent (0 al darrer
+torn), energia = RUCs no energètics + 1, smithore cap. A l'Estàndard l'ordinador s'atura en arribar-hi («Venedor al nivell crític!») i
+l'humà pot vendre per sota; al Principiant s'hi atura tothom.
+
+## Subhasta de terres
+
+Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
+
+- Primer les parcel·les que els colons han marcat a l'oficina de terres (ven el propietari i cobra ell), després **0–3 parcel·les de la
+  colònia** (1 + variació: 0 el 16,2 %, 1 el 67,7 %, 2 el 16,1 %, 3 el 0,1 %; mai més que parcel·les lliures; cobra la botiga).
+- Preu inicial: **160 cr** a la primera subhasta de la partida; cada parcel·la següent, 60 cr menys que el preu de l'anterior; la primera
+  d'un torn nou, 60 cr menys que la mitjana del torn anterior. Si una parcel·la de la colònia no rep cap oferta, compta com
+  inicial / 2 + 52 i ja no se'n subhasten més aquell torn.
+- Els marcadors dels postors pugen de 4 en 4 cr des de sota la línia «Les ofertes comencen a N cr»; ningú no pot oferir més del que té.
+  Quan s'acaba el temps (72 unitats, com la negociació) guanya l'oferta més alta («Oferta més alta: N cr»); en empat, el colon amb menys
+  patrimoni. Resultat: «Parcel·la venuda! Preu de venda: N cr» o «Sense ofertes / La parcel·la no s'ha venut!». La marca d'«EN VENDA»
+  s'esborra sempre; una parcel·la no venuda es queda el propietari, amb el seu RUC si en tenia (el RUC també passa al comprador).
+- IA: puja mentre no és l'oferta més alta i el preu següent no passa de la seva valoració (`AISystem.landValue`).
+
 ## Fonts i criteri de confiança
 
 - **[manual]** EA/Ozark *M.U.L.E. Player's Guide* (1983), https://www.mocagh.org/ea/mule-manual.pdf (transcripció C64: https://project64.c64.org/Games/MULE10.TXT).
@@ -262,13 +303,17 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | Oferta i demanda: P × (0,25 + 0,75 × demanda/oferta), quocient en vuitens; smithore amb quocient entre 0,25 i 3, mínim provisional 50 i pas aleatori de 7 × binomial (−28..+28); mínims 30 / 25 / 20, sostre 250 | codi Atari | `StoreSystem.updatePrices`, `supplyDemand`, `limit` |
 | Preu del RUC: 2 × preu del smithore arrodonit avall a desenes (100 al començament) | codi Atari, C64 | `StoreSystem.rucPrice` |
 | Sense estoc a la botiga, el preu entre colons no té sostre | manual (Standard) | `AuctionEngine.playerMax` |
+| Temps de subhasta: declaració 31 × 7 fotogrames, negociació 72 × 8 (60 per unitat en contacte); Principiant ATU 50 (×5/3), el doble al torn 1 | C64, codi Atari | `CONFIG.AUCTION`, `AuctionEngine.timing` |
+| Línies 1 pas cada 8 fotogrames ($1 per pas a menjar, energia i smithore); transferència unitat a unitat cada 12, 12, 10, 8, 6, 4, 2… BTU mentre es toquen | codi Atari | `AuctionEngine.update`, `cadenceMs` |
+| Nivell crític: menjar del torn següent, energia = RUCs no energètics + 1; a l'Estàndard només s'aturen els ordinadors, al Principiant tothom | codi Atari, manual | `ConsumptionSystem.criticalLevel`, `AuctionEngine.atCritical` |
+| Subhasta de terres (Estàndard): 0–3 parcel·les de colònia, 160 cr la primera, −60 cr, sense ofertes = inicial / 2 + 52 i s'acaba el lot, 4 cr per pas, guanya la més alta (empat: menys patrimoni); primer les marcades a l'oficina | codi Atari, C64 | `LandAuction` |
 | Retorn al corral: preu sencer del robot, mai l'equip; temps esgotat portant-lo o Acció fora de la casa: fuig | manual | `DevWalk`, `StoreSystem.refundRuc` |
 | Corral → taller → casa de la parcel·la, a peu, amb el rellotge corrent; «cal entrar-hi del tot i sortir» | manual | `DevWalk`, `TOWN` |
 | Una sola passada a la cursa de terra; empat per menys patrimoni | manual | `LandRace.endSweep` |
 | Desenvolupament del líder a l'últim; al revés si al corral hi ha 7 RUCs o menys (el manual diu «menys de 7») | manual, codi Atari | `DevOrder` |
 | Subhastes smithore → (crystite) → menjar → energia, amb declaració cronometrada; després el rol és fix | manual | `auctionResources`, `AuctionEngine.stage` |
 | Empat a igual preu: guanya el colon amb menys patrimoni; la botiga, després dels colons | manual | `AuctionEngine._order` |
-| Preu de l'operació on es troben les línies (el marcador que ja hi era) | manual | `AuctionEngine._tradePrice` |
+| Preu de l'operació on es toquen les línies (la del venedor) | manual | `AuctionEngine.tryTrade` |
 | Esdeveniments personals: els 22 de l'original en el mateix ordre i amb els mateixos pesos; 27,5 % (22/80) a l'inici del torn de cada colon (humans i IA); cada un un cop per partida per a tothom; si el triat no val es prova el de sota (circular) fins a 20 cops | codi Atari, C64 (mateixos textos i ordre) | `EVENT_DEFS`, `EventSystem.rollIndividual`, `search` |
 | El 1r mai rep un esdeveniment bo i els **dos últims** mai un de dolent (classificació de l'últim resum, empats a l'atzar) | codi Atari | `EventSystem.eligible`, `rankPlayers` |
 | Import = \|pes\| × 25 × (floor(torn / 4) + 1); per RUC als de mineria, energia i menjar; els del RUC demanen tenir-ne algun d'instal·lat; una penalització que no es pot pagar s'anul·la en silenci | codi Atari | `EventSystem.amount`, `precondition`, `affordable` |
@@ -293,9 +338,14 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | Quins RUCs s'aturen si falta energia | codi Atari: «una explotació a l'atzar»; [FN] només entre les no energètiques | a l'atzar entre els RUCs no energètics, sense repetir | mitjana | Provocar escassetat amb diversos RUCs i mirar quins s'aturen |
 | Béns al resum de patrimoni | codi Atari: al preu P; C64: el resum #0 mostra GOODS 150 per a 4 menjar + 2 energia (amb P 30/25 serien 170) | al preu P | mitjana (contradicció oberta) | Llegir el resum de patrimoni en emulador amb inventaris diferents |
 | Moment de la comprovació del fracàs per manca total | codi Atari: la regla és segura, el moment no | al final de cada torn (fase `NEXT`) | mitjana | Provocar-ho en emulador |
-| Tancament del marge de la botiga | no és de l'original | després de 5 s sense operacions, la línia de compra / venda s'acosta a P un pas cada 2 s | — | Revisar amb el lot de subhastes |
-| Límit de compra de la botiga (24 u) | codi Atari: no se n'ha trobat cap (només el sostre de 255) | `storeBuyCap` 24 | baixa | Vendre a la botiga fins que deixi de comprar |
-| Durada de la declaració | manual: hi ha comptador, sense segons | 5 s | baixa | Cronometrar el *Declare Timer* |
+| Límit de compra de la botiga | codi Atari: només s'ha vist el sostre de 255 | `storeBuyCap` 255 | mitjana | Vendre a la botiga fins que deixi de comprar |
+| Temps de negociació | C64: 72–75 unitats mesurades; codi Atari: 70 | 72 (el mínim mesurat) | mitjana | Cronometrar diverses subhastes en emulador |
+| Unitat de temps amb el joystick premut | codi Atari: ATU sencera (30 fotogrames) mentre es prem; C64 no mesurat | 30 fotogrames, només per a l'humà (els ordinadors no tenen joystick) | baixa | Cronometrar al C64 amb el joystick premut |
+| Temps al Principiant | codi Atari: ATU 50, doblada al torn 1 | totes les unitats ×5/3 (×10/3 al torn 1), escalant les mesures del C64 | baixa | Cronometrar una subhasta del Principiant |
+| Final anticipat de la subhasta | no consta | s'acaba si tots els colons estan fora 3 s o si cap operació és possible 5 s | baixa | Comprovar-ho en emulador |
+| Subhasta de terres: quina parcel·la ofereix la colònia, el temps (72 unitats), les cartes d'inici (2 s) i resultat (2,5 s), preu inicial mínim 4 cr, marcadors 10 passos sota la línia | codi Atari: no consta | parcel·la lliure a l'atzar; resta com a la negociació | baixa | Observar subhastes de terres en emulador |
+| Subhasta de terres: el venedor canvia el preu demanat | manual: si el venedor canvia el preu, es rebutgen les ofertes | no implementat: el venedor humà només mira | baixa | — |
+| Valoració de la terra de la IA | codi Atari: (millor explotació + 0..7) × torns que queden; l'escala en diners no consta | puntuació de la parcel·la × (20 + 8 × torns que queden) ± 8 %, mai més que l'efectiu − 200 (≈ 540 cr al torn 1; el C64 va vendre a 536) | baixa | — |
 | Pluja àcida sobre un RUC de menjar sense energia | codi Atari: s'aplica a la producció de totes les parcel·les del tipus | també suma +1 de menjar (0 → 1) | mitjana | Provocar escassetat d'energia amb pluja àcida en emulador |
 | Lliscament de muntanya del terratrèmol: casos límit | codi Atari: 50 %, muntanya a l'atzar, esquerra o dreta, −1 / +1 nivell, destrueix els RUCs | si el costat triat és fora del mapa, riu, poble o ja té 3 cims, es prova l'altre; si cap no val, no llisca | baixa | Observar terratrèmols en emulador |
 | Moment del sorteig de la classificació dels esdeveniments | codi Atari: `ordersPlayer` del darrer resum, empats a l'atzar | sortejada un cop a l'inici de cada torn (PRNG sembrat) | mitjana | — |
@@ -307,25 +357,18 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 | «No s'hi admeten RUCs» al pub i a l'oficina de terres | C64: la cadena «NO MULES ALLOWED» existeix, però no se sap a quins edificis surt | no s'hi pot entrar amb un RUC (no fuig) | baixa | Entrar al pub amb un RUC en emulador |
 | Rellotge a l'oficina de terres | manual: el temps s'atura mentre marques la parcel·la | el rellotge continua corrent | baixa | Comprovar-ho en emulador |
 | Fi del torn portant un RUC al Principiant | codi Atari: només documenta que un premut equivocat «només avisa» | fuig igual que a l'Estàndard | baixa | Esgotar el temps amb un RUC al Principiant |
-| Valors de la IA (reacció 400–900 ms, error ±8 %, reserva 3) | l'original no té nivells de IA i no se n'ha transcrit el comportament de subhasta | antics valors «Colònia» (`CONFIG.AI`) | — | Lot 4 (subhastes) |
+| Valors de la IA (reacció 400–900 ms, error ±8 %, reserva 3) i comportament a la subhasta | l'original no té nivells de IA i no se n'ha transcrit el comportament de subhasta | antics valors «Colònia» (`CONFIG.AI`); a la subhasta de béns deixa de comprar / vendre en arribar al seu límit | — | Transcriure la IA de subhasta del desassemblatge |
 | Instal·lació i fugida animades (pujada/afegit/baixada del RUC; espurneig i sortida corrents); casa = tota la parcel·la | no són regles del C64, són decisions de disseny pròpies | 1800 ms d'instal·lació, 400+900 ms de fugida (`CONFIG.WALK.installMs/fleeShuffleMs/fleeRunMs`) | — (no aplica: no és una afirmació de fidelitat) | — |
 | Botiga/corral: el colon es queda a la porta i només el RUC camina fins al taulell i torna | no és una regla del C64, és una decisió de disseny pròpia | cal empènyer 350 ms a la porta perquè comprometi la visita; 2200 ms de viatge del RUC (`CONFIG.WALK.doorHoldMs/visitMs`) | — (no aplica) | — |
-| Separació de marcadors després de cada unitat | l'original manté la unitat a unitat mentre les línies es toquen | R.U.C. separa 2 passos després de cada unitat i cal tornar a creuar 0,5 s | — | Decidir si es canvia (ajornat, vegeu sota) |
-
-### Pendents de Fase A (no implementats, sense evidència suficient)
-
-- **Subhastes de terra** (lot 4): les parcel·les marcades a l'oficina de terres es desen (`state.landSales`) però encara no es subhasten.
-- **Principiant a les subhastes** (lot 4): temps de subhasta (ATU 50) i bloqueig de tots els venedors al nivell crític.
 
 ### Ajornat (fora d'aquest encàrrec)
 
-- Transferència contínua unitat a unitat mentre les línies es toquen (vegeu la taula).
-- Fase B: subhastes de terra, crystite, assay, collusion, wampus (`FEATURES.*` a `false`; el preu del crystite no s'ha tocat).
+- Fase B: crystite, assay, collusion, wampus (`FEATURES.crystite` i `FEATURES.wampus` a `false`; el preu del crystite no s'ha tocat).
 
 ## Fase B (preparada, no visible)
 
-`FEATURES.crystite`, `FEATURES.wampus` i `FEATURES.landAuctions` són `false` i no es mostra cap control. Els punts d'extensió existeixen:
+`FEATURES.crystite` i `FEATURES.wampus` són `false` i no es mostra cap control (`FEATURES.landAuctions` ja és `true`). Els punts d'extensió existeixen:
 `RESOURCE.CRYSTITE` a `RESOURCE_DEFS` amb `enabled:false` (producció, malbaratament i subhasta recorren el registre; `AUCTION_ORDER` ja
 reserva el lloc del crystite entre smithore i menjar); `hiddenDeposit` a cada parcel·la; `TurnSystem.insertAfter/insertBefore` i el hook
 `afterDevelopment`; `InputManager` amb contexts independents; `AuctionEngine` rep una `marketDefinition` i lots genèrics
-(`{ id, kind, quantity, sellerId, transferable, getValue(), transfer() }`). Els self-tests demostren un 4t recurs i un lot únic de terra.
+(`{ id, kind, quantity, sellerId, transferable, getValue(), transfer() }`). Els self-tests demostren un 4t recurs i un lot únic genèric (la subhasta de terres real és `LandAuction`, ascendent).

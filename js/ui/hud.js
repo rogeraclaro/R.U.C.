@@ -10,7 +10,6 @@ const COL = {
 };
 const fmtCr = (n) => `${n} cr`;
 const resLabel = (id) => (RESOURCE_DEFS[id] ? RESOURCE_DEFS[id].label : id);
-const fmtTime = (ms) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const colorIdOf = (hex) => (CONFIG.PLAYER_COLORS.find((c) => c.hex === hex) || CONFIG.PLAYER_COLORS[0]).id;
 const portraitFrame = (p) => CONFIG.PLAYER_COLORS.findIndex((c) => c.hex === p.color);
 
@@ -31,7 +30,7 @@ const Hud = {
     });
     const tl = game.hudTimer();
     if (tl) {
-      const urgent = tl.left < 10000;
+      const urgent = tl.left / tl.total < 0.2;
       r.bar(766, 18, 164, 20, tl.left / tl.total, urgent ? COL.bad : COL.cyan);
       r.text('temps', 766, 40, { size: 14, color: COL.dim });
     }

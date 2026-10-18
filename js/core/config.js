@@ -40,15 +40,40 @@ const CONFIG = deepFreeze({
   // [Atari code] store price P: floors food 30 / energy 25 / smithore 20 (smithore: 50 before its random step), ceiling 250.
   // smithoreStep: the random term is 7 x binomial (amplitude 2), i.e. -28..+28.
   STORE_PRICE: { max: 250, smithoreInterimMin: 50, smithoreStep: 7, smithoreStepMax: 4 },
+  /*
+   * Goods auctions. Time is counted in units of the time bar, each lasting a number of PAL frames that depends on what happens:
+   *   declareUnits x frames.declare: [C64] measured 31 units x 7 frames (~4.3 s) ([Atari code]: 30 ticks of ATU/4).
+   *   tradeUnits x frames.idle: [C64] measured 72-75 units x 8 frames (~11.5 s) when nobody trades ([Atari code]: 70 ticks of ATU/4,
+   *     ATU = 30 frames in Standard). We take 72, the low end of the C64 measurement.
+   *   frames.contact: [C64] ~60 frames per unit while a buyer and a seller touch (the [Atari code] stops the clock instead; C64 wins).
+   *   frames.push: [Atari code] the tick is the full ATU (30 frames) while a player pushes the stick (a computer has no stick).
+   *     [PROVISIONAL] for the C64: not measured there.
+   * The level's ATU scales every tick (CONFIG.LEVELS auctionAtu: Standard 30, Beginner 50; Beginner doubles it in round 1).
+   * lineFrames: [Atari code] a marker moves one price step every 8 frames (humans and computers alike).
+   * cadenceBtu: [Atari code] while two lines touch, one unit changes hands every 12, 12, 10, 8, 6, 4, 2, 2... BTU (4 frames each); the
+   *   cadence starts again when the contact breaks.
+   * sellerStartSteps / buyerStartSteps: [FN] sellers start 1 step above the store sell line, buyers 10 steps below the store buy line.
+   * storeBuyCap: [Atari code] the only store stock limit seen (255).
+   * playerPriceMax: technical UI limit for colonist-to-colonist prices when the store is out of stock ([manual]: no rule cap).
+   * allOutMs / noOpMs: [PROVISIONAL] R.U.C. pacing: the auction ends early when every colonist stays out, or when no deal is possible.
+   * pushMs: how long one human marker move keeps the "stick pushed" tick (input arrives per frame or per pointer event).
+   * aiHoldMs: a computer re-thinks its target at most this often (not from the original: see AISystem).
+   */
   AUCTION: {
-    // declareMs: [PROVISIONAL] length of the buyer/seller declaration (the manual has a Declare Timer but gives no seconds).
-    // playerPriceMax: technical UI limit for colonist-to-colonist prices when the store is out of stock ([manual]: no rule cap).
-    declareMs: 5000, playerPriceMax: 999,
-    maxMs: 45000, matchMs: 500, separateSteps: 2, allOutMs: 3000, noOpMs: 5000,
-    storeIdleMs: 5000, storeNudgeMs: 2000, storeBuyCap: 24,
-    aiHoldMs: 1500, aiMoveMs: 110,
-    humanStepsPerSec: 9
+    declareUnits: 31, tradeUnits: 72, frames: { declare: 7, idle: 8, push: 30, contact: 60 }, atuStandard: 30,
+    lineFrames: 8, cadenceBtu: [12, 12, 10, 8, 6, 4, 2], btuFrames: 4,
+    sellerStartSteps: 1, buyerStartSteps: 10, storeBuyCap: 255, playerPriceMax: 999,
+    allOutMs: 3000, noOpMs: 5000, pushMs: 100, aiHoldMs: 1500
   },
+  /*
+   * Land auctions ([Atari code], Standard and Tournament only). firstStart: the first auction of the game starts at $160 ([C64] "BIDS
+   * START AT $160"); drop: every later lot of a set starts $60 below the previous price, and a new round's set starts $60 below the
+   * previous set's average; noBid: an unsold colony plot records start / 2 + 52 and ends the colony set; step: $4 per marker step.
+   * maxLots: [Atari code] 1 + variation (0..3 in Standard). Timing: the same time units as the goods trade stage (tradeUnits, idle /
+   * push ticks; [Atari code] 70 ATU per auction). minStart, bottomSteps, introMs, resultMs: [PROVISIONAL] R.U.C. values (the start
+   * never drops below $4; bidders' markers start 10 steps below the start line; intro and result cards are shown 2 s and 2.5 s).
+   */
+  LAND_AUCTION: { firstStart: 160, drop: 60, noBidHalf: 52, step: 4, maxLots: 3, minStart: 4, bottomSteps: 10, introMs: 2000, resultMs: 2500 },
   // Land race: the game clock advances in fixed steps so the outcome never depends on the frame rate. The cursor speed and the
   // claim pause depend on the level (CONFIG.LEVELS cursorFrames; [Atari code] the pause is 4 cursor steps).
   LAND: { stepMs: 10, holdMs: 900, claimPauseSteps: 4 },
@@ -89,14 +114,16 @@ const CONFIG = deepFreeze({
    * values above (see levelRules). cursorFrames: land-grant cursor, frames per plot ([C64] Standard 16; [Atari code] Beginner 8 BTU
    * = 32). extraBtu: [Atari code] Beginner +2 BTU per development unit. Beginner also: no production variation, smithore fixed at
    * $50, double store stocks with 25 M.U.L.E.s (smithore 0 and 25 M.U.L.E.s again every round), 8 food / 4 energy to start, no
-   * land selling, and a M.U.L.E. never runs away on a wrong button press. Tournament needs crystite, assay and collusion (Phase B).
-   * Not wired here (Batch 4): Beginner auction timing (ATU 50) and its critical-level block for every seller.
+   * land selling nor land auctions, and a M.U.L.E. never runs away on a wrong button press. auctionAtu: [Atari code] auction time unit
+   * (Beginner 50 frames instead of 30, doubled in round 1: atuRound1x2). criticalBlocksAll: [Atari code] in Beginner every seller stops
+   * at the critical level (in Standard only computers do). Tournament needs crystite, assay and collusion (Phase B).
    */
   LEVELS: {
     beginner: {
       label: 'Principiant', rounds: 6, cursorFrames: 32, extraBtu: 2, varAmp: 0, smithorePrice: 50,
       startInv: { food: 8, energy: 4, smithore: 0 }, storeStart: { food: 16, energy: 16, smithore: 0 }, rucStart: 25, rucMax: 25,
-      rucReset: true, missFlees: false, landSales: false
+      rucReset: true, missFlees: false, landSales: false, landAuctions: false,
+      auctionAtu: 50, atuRound1x2: true, criticalBlocksAll: true
     },
     standard: { label: 'Estàndard', rounds: 12, cursorFrames: 16 },
     tournament: { label: 'Torneig', rounds: 12, disabled: true, note: 'cal crystite, Fase B' }
@@ -134,7 +161,8 @@ const CONFIG = deepFreeze({
   // Schema 3: original start stocks, store price P in the state, new food/time/score rules.
   // Schema 4: the 22 original personal events (used flags) and the planetary event bag (state.events).
   // Schema 5: game level (state.level replaces difficulty), species, land sales, original land/walk pacing.
-  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 5, MAX_DT_MS: 50
+  // Schema 6: original auction timing, continuous trading and critical levels; land auctions (state.landAuction, LAND_AUCTION phase).
+  SAVE_KEY: 'ruc-save-v1', SCHEMA_VERSION: 6, MAX_DT_MS: 50
 });
 
 /** The rules of the state's level: CONFIG.LEVELS entry over the Standard defaults. */
@@ -145,7 +173,9 @@ function levelRules(state) {
     id, label: L.label, rounds: L.rounds, cursorFrames: L.cursorFrames || CONFIG.LEVELS.standard.cursorFrames, extraBtu: L.extraBtu || 0,
     varAmp: L.varAmp === undefined ? CONFIG.PRODUCTION.varAmp : L.varAmp, smithorePrice: L.smithorePrice || null,
     startInv: L.startInv || CONFIG.START_INV, storeStart: L.storeStart || CONFIG.STORE_START, rucStart: L.rucStart || CONFIG.RUC_START,
-    rucMax: L.rucMax || CONFIG.RUC_MAX, rucReset: !!L.rucReset, missFlees: L.missFlees !== false, landSales: L.landSales !== false
+    rucMax: L.rucMax || CONFIG.RUC_MAX, rucReset: !!L.rucReset, missFlees: L.missFlees !== false, landSales: L.landSales !== false,
+    landAuctions: L.landAuctions !== false, auctionAtu: L.auctionAtu || CONFIG.AUCTION.atuStandard, atuRound1x2: !!L.atuRound1x2,
+    criticalBlocksAll: !!L.criticalBlocksAll
   };
 }
 /** The last round of the game (the ship comes back): 12 in Standard, 6 in Beginner. */
@@ -168,7 +198,7 @@ const COLONY_RATINGS = Object.freeze([
 ]);
 
 /* Mutable on purpose: Phase B modules are wired behind these flags. */
-const FEATURES = { crystite: false, wampus: false, landAuctions: false };
+const FEATURES = { crystite: false, wampus: false, landAuctions: true };
 
 const RESOURCE = Object.freeze({
   FOOD: 'food', ENERGY: 'energy', SMITHORE: 'smithore',
@@ -180,11 +210,12 @@ const ROLE = Object.freeze({ BUYER: 'BUYER', SELLER: 'SELLER', OUT: 'OUT' });
 // basePrice: [Atari code][C64] starting store price P (food 30, energy 25, smithore 50). priceFloor: [Atari code] lowest P.
 // storeBuyOff / storeSellOff: [Atari code][C64] the store buys at P - buyOff and sells at P + sellOff (food & energy -15/+20,
 // smithore 0/+35). minPrice / maxPrice: the auction's price window = floor - buyOff .. ceiling 250 + sellOff (marker bounds).
+// auctionStep: [Atari code] $1 per marker step for food, energy and smithore.
 // Crystite is Phase B and deliberately left as it was.
 const RESOURCE_DEFS = deepFreeze({
   food: { id: 'food', label: 'Menjar', icon: 'resource_food', module: 'module_food', enabled: true, basePrice: 30, priceFloor: 30, storeBuyOff: 15, storeSellOff: 20, minPrice: 15, maxPrice: 270, auctionStep: 1, color: '#7bd66f' },
   energy: { id: 'energy', label: 'Energia', icon: 'resource_energy', module: 'module_energy', enabled: true, basePrice: 25, priceFloor: 25, storeBuyOff: 15, storeSellOff: 20, minPrice: 10, maxPrice: 270, auctionStep: 1, color: '#4fd1e6' },
-  smithore: { id: 'smithore', label: 'Smithore', icon: 'resource_smithore', module: 'module_smithore', enabled: true, basePrice: 50, priceFloor: 20, storeBuyOff: 0, storeSellOff: 35, minPrice: 20, maxPrice: 285, auctionStep: 2, color: '#ff9a3c' },
+  smithore: { id: 'smithore', label: 'Smithore', icon: 'resource_smithore', module: 'module_smithore', enabled: true, basePrice: 50, priceFloor: 20, storeBuyOff: 0, storeSellOff: 35, minPrice: 20, maxPrice: 285, auctionStep: 1, color: '#ff9a3c' },
   crystite: { id: 'crystite', label: 'Crystite', icon: 'resource_smithore', module: 'module_smithore', enabled: false, basePrice: 90, minPrice: 30, maxPrice: 300, auctionStep: 3, color: '#d77bff' }
 });
 

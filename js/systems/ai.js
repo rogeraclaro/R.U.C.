@@ -23,14 +23,17 @@ const AISystem = {
   },
   /** The role a colonist starts the declaration with: [manual] "If you have a surplus ... your character will automatically jump to SELL". */
   defaultRole(state, p, res) {
-    const critical = res === 'food' ? ConsumptionSystem.foodNeed(Math.min(lastRound(state), state.turn + 1)) : res === 'energy' ? this.nonEnergyRucs(state, p) + 1 : 0;
-    return (p.inventory[res] || 0) > critical ? ROLE.SELLER : ROLE.BUYER;
+    return (p.inventory[res] || 0) > ConsumptionSystem.criticalLevel(state, p, res) ? ROLE.SELLER : ROLE.BUYER;
   },
   createBrain(state, rng, p) {
     const d = this.diff(state);
-    return { id: p.id, role: ROLE.OUT, target: null, nextDecisionAt: rng.range(d.reactMin, d.reactMax), nextMoveAt: 0 };
+    return { id: p.id, role: ROLE.OUT, target: null, limit: null, nextDecisionAt: rng.range(d.reactMin, d.reactMax), nextMoveAt: 0 };
   },
-  /** Picks role + target price. Prices drift from an optimistic start toward the store's price as time passes. */
+  /**
+   * Picks role + target price + `limit` (a seller keeps `limit` units, a buyer stops at `limit` units: with continuous trading a
+   * line that touches keeps trading). Prices drift from an optimistic start toward the store's price as the trade time runs out.
+   * Not from the original ([Atari code]: the auction AI is undocumented); the engine enforces the critical level on its own.
+   */
   decide(state, rng, p, engine) {
     const def = engine.market; const res = def.id;
     const prof = this.profile(p); const d = this.diff(state);
@@ -38,7 +41,7 @@ const AISystem = {
     const central = StoreSystem.price(state, def);
     const err = (rng.next() * 2 - 1) * d.valuationErr / 100;
     const val = central * (1 + err);
-    const progress = clamp(engine.t / (CONFIG.AUCTION.maxMs * 0.7), 0, 1);
+    const progress = clamp(engine.progress() / 0.7, 0, 1);
     const storeBid = StoreSystem.bid(state, def); const storeAsk = StoreSystem.ask(state, def);
     const cap = (price) => prof.extremeGuard ? clamp(price, def.basePrice * 0.7, def.basePrice * 1.4) : price;
     const cash = p.cash;
@@ -48,7 +51,7 @@ const AISystem = {
       const start = val * (1 + margin / 100);
       let floor = storeBid;
       if (p.aiProfile === 'industrial' && res === 'smithore') floor = Math.max(storeBid, val * 0.9);
-      return { role: ROLE.SELLER, target: cap(start - (start - floor) * progress) };
+      return { role: ROLE.SELLER, target: cap(start - (start - floor) * progress), limit: reserve };
     }
     const desperate = (res === 'food' && inv < ConsumptionSystem.foodNeed(state.turn + 1) - this.expectedProd(state, p, 'food')) || (res === 'energy' && inv < this.nonEnergyRucs(state, p));
     const speculate = p.aiProfile === 'opportunist' && inv < reserve + 6 && central < def.basePrice * 0.85 && cash > 500 && state.turn < lastRound(state);
@@ -59,14 +62,15 @@ const AISystem = {
       let bid = cap(start + (ceiling - start) * progress);
       const safety = desperate ? 0 : 120;
       bid = Math.min(bid, cash - safety);
-      if (bid < def.minPrice) return { role: ROLE.OUT, target: null };
-      return { role: ROLE.BUYER, target: bid };
+      if (bid < def.minPrice) return { role: ROLE.OUT, target: null, limit: null };
+      return { role: ROLE.BUYER, target: bid, limit: speculate ? reserve + 6 : reserve };
     }
-    return { role: ROLE.OUT, target: null };
+    return { role: ROLE.OUT, target: null, limit: null };
   },
   /**
-   * Declares during the declaration and moves the marker gradually during the trade stage, honouring reaction latency and the 1.5 s
-   * decision hold. Roles are fixed after the declaration: an AI that changes its mind retreats instead of switching sides.
+   * Declares during the declaration and moves the marker one step per [Atari code] line step (8 frames) during the trade stage,
+   * honouring reaction latency and the 1.5 s decision hold. Roles are fixed after the declaration: an AI that changes its mind (or
+   * reaches its `limit`) retreats instead of switching sides.
    */
   tick(state, rng, p, brain, engine, dt) {
     const e = engine.entry(p.id);
@@ -74,24 +78,40 @@ const AISystem = {
       const d = this.decide(state, rng, p, engine);
       const d0 = this.diff(state);
       brain.nextDecisionAt = engine.clock + Math.max(CONFIG.AUCTION.aiHoldMs, rng.range(d0.reactMin, d0.reactMax));
-      if (engine.canDeclare()) { engine.setRole(p.id, d.role); brain.role = d.role; brain.target = d.target; }
+      if (engine.canDeclare()) { engine.setRole(p.id, d.role); brain.role = d.role; brain.target = d.target; brain.limit = d.limit; }
       else {
         brain.role = e.role;
         if (e.role === ROLE.OUT) brain.target = null;
-        else if (d.role === e.role) brain.target = d.target;
+        else if (d.role === e.role) { brain.target = d.target; brain.limit = d.limit; }
         else brain.target = e.role === ROLE.SELLER ? engine.market.maxPrice : engine.market.minPrice;
       }
     }
     if (engine.stage !== 'trade') return;
+    const inv = p.inventory[engine.market.id] || 0;
+    if (brain.limit !== null && brain.limit !== undefined && brain.target !== null) {
+      if (e.role === ROLE.BUYER && inv >= brain.limit) brain.target = engine.market.minPrice;
+      if (e.role === ROLE.SELLER && inv <= brain.limit) brain.target = engine.market.maxPrice;
+    }
     brain.nextMoveAt -= dt;
     if (brain.target !== null && e.role !== ROLE.OUT) {
       while (brain.nextMoveAt <= 0) {
-        brain.nextMoveAt += CONFIG.AUCTION.aiMoveMs;
+        brain.nextMoveAt += AuctionEngine.lineMs();
         const diff = brain.target - e.priceF;
         const s = engine.market.step;
         if (Math.abs(diff) >= s) engine.setPrice(p.id, e.priceF + Math.sign(diff) * s);
       }
     } else brain.nextMoveAt = 0;
+  },
+  /**
+   * Most a computer pays for a plot in a land auction. [Atari code] rates a plot by its exploitation (here LandGrantSystem.scorePlot)
+   * times the rounds left; the money scale is [PROVISIONAL]: score x (20 + 8 x rounds left) +-valuation error (a typical round-1 plot
+   * ~ $540, close to the $536 sale seen on the [C64]), never more than its cash minus a $200 reserve.
+   */
+  landValue(state, rng, p, plot) {
+    const roundsLeft = Math.max(0, lastRound(state) - state.turn);
+    const err = 1 + (rng.next() * 2 - 1) * this.diff(state).valuationErr / 100;
+    const v = LandGrantSystem.scorePlot(state, p, plot) * (20 + 8 * roundsLeft) * err;
+    return Math.max(0, Math.floor(Math.min(v, p.cash - 200)));
   },
   /**
    * Development for AI colonists (also used by the autopilot for the human). [manual] the computer players are not shown walking

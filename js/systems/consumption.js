@@ -6,6 +6,15 @@ const ConsumptionSystem = {
   devUnits(food, need) { return CONFIG.DEV.baseUnits + Math.floor(CONFIG.DEV.foodUnits * Math.min(1, need > 0 ? food / need : 1)); },
   /** [Atari code] frames per development unit: 4 x (7 BTU + species BTU (Flapper +2, Humanoid -2) + level BTU (Beginner +2)). */
   unitFrames(state, player) { return CONFIG.DEV.btuFrames * (CONFIG.DEV.unitBtu + speciesById(player.species).btu + levelRules(state).extraBtu); },
+  /**
+   * The colonist's critical level of a good for the auctions (the requirement line of the status and auction screens):
+   * [Atari code] food = next round's requirement (round 12: 0), energy = non-energy M.U.L.E.s + 1 (one new M.U.L.E.), smithore none.
+   */
+  criticalLevel(state, player, res) {
+    if (res === 'food') return state.turn >= lastRound(state) ? 0 : this.foodNeed(state.turn + 1);
+    if (res === 'energy') return state.plots.filter((q) => q.ownerId === player.id && q.ruc && q.ruc.module !== 'energy').length + 1;
+    return 0;
+  },
   /** One development unit in ms ([C64] PAL 50.125 Hz). */
   unitMs(state, player) { return this.unitFrames(state, player) * 1000 / CONFIG.DEV.palHz; },
   /** Development units of a colonist this turn, counted with the food it holds when its turn starts (eaten later, at production). */
