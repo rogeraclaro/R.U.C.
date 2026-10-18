@@ -834,11 +834,11 @@ function runSelfTests() {
     e.setRole('p1', ROLE.SELLER); e.setPrice('p1', 200); e.setRole('p0', ROLE.BUYER); e.setPrice('p0', 250); runEngine(e, 1000);
     return e.volume === 1 && plot.ownerId === 'p0' ? true : 'plot did not change owner';
   });
-  t('Phase B stays off (crystite, wampus); land auctions are on; crystite disabled and not auctioned, hidden deposits kept', () => {
+  t('Phase B stays off (crystite); the wampus has no flag; land auctions are on; crystite disabled and not auctioned, hidden deposits kept', () => {
     const ids = enabledResources().map((d) => d.id).join();
     if (ids !== 'food,energy,smithore') return `enabled ${ids}`;
     if (RESOURCE_DEFS.crystite.enabled || !('hiddenDeposit' in fresh().state.plots[0])) return 'crystite / hiddenDeposit';
-    return FEATURES.crystite === false && FEATURES.wampus === false && FEATURES.landAuctions === true ? true : 'feature flags';
+    return FEATURES.crystite === false && !('wampus' in FEATURES) && FEATURES.landAuctions === true ? true : 'feature flags';
   });
 
   /* ---------- Batch 4: land auctions ---------- */
@@ -1341,9 +1341,130 @@ function runSelfTests() {
     return EventSystem.shipBack().name === 'La nau ha tornat!' ? true : 'ship back';
   });
 
+  /* ---------- Batch 7: the Mountain Wampus ---------- */
+  const mountainIds = (state) => state.plots.filter((p) => p.terrain === TERRAIN.MOUNTAIN).map((p) => p.id);
+  /** Puts the walker on the map, in the middle of plot `id` (test teleport: the walk itself is covered elsewhere). */
+  const standOn = (state, w, id) => { const p = state.plots[id]; w.area = 'map'; w.x = p.x * CONFIG.TILE + CONFIG.TILE / 2; w.y = p.y * CONFIG.TILE + CONFIG.TILE / 2; };
+  /** A walker with a wampus that is visible right now on its mountain (the walker stays in town). */
+  const wampusVisible = (seed = 'wampus', level = 'standard') => {
+    const { state } = fresh(seed, level); const w = DevWalk.create(state, 'p0', 60000);
+    w.wampus = WampusSystem.create(state, 'p0', 0, false);
+    go(state, w, { x: 0, y: 0 }, 10);
+    return { state, w };
+  };
+  t('Wampus: [Atari code] reward 100 x (floor(round / 4) + 1): R1-3 100, R4-7 200, R8-11 300, R12 400', () => {
+    const got = Array.from({ length: 12 }, (_, i) => WampusSystem.reward(i + 1)).join();
+    return eq(got, '100,100,100,200,200,200,200,300,300,300,300,400', 'rewards');
+  });
+  t('Wampus: [Atari code] first appearance after Ta/4 PTU (Ta = BTU waited before start, max 255; a personal event takes 100 off)', () => {
+    const btu = CONFIG.DEV.btuFrames * 1000 / CONFIG.DEV.palHz;
+    const cases = [[0, false, 0], [40, false, 10], [43, false, 10], [255, false, 63], [400, false, 63], [255, true, 38], [50, true, 0], [150, true, 12]];
+    for (const [b, ev, ptu] of cases) { const got = WampusSystem.firstDelayPtu(b * btu + 1, ev); if (got !== ptu) return `${b} BTU event ${ev}: ${got} PTU, expected ${ptu}`; }
+    const { state } = fresh('wampus-first'); const w = DevWalk.create(state, 'p0', 60000);
+    w.wampus = WampusSystem.create(state, 'p0', 40 * btu + 1, false);
+    if (w.wampus.visible || !mountainIds(state).includes(w.wampus.plotId)) return `start ${JSON.stringify(w.wampus)}`;
+    go(state, w, { x: 0, y: 0 }, 10 * w.unitMs - 20);
+    if (w.wampus.visible) return 'appeared before 10 PTU';
+    go(state, w, { x: 0, y: 0 }, 30);
+    return w.wampus.visible ? true : 'not visible after 10 PTU';
+  });
+  t('Wampus: [Atari code] visible 1-4 PTU, then hidden: stays put 4-7 PTU or moves to a random mountain after exactly 2 PTU (seeded)', () => {
+    const trace = (seed) => {
+      const { state } = fresh(seed); const w = DevWalk.create(state, 'p0', 600000);
+      w.wampus = WampusSystem.create(state, 'p0', 0, false);
+      const spans = []; let vis = w.wampus.visible; let since = 0; let plot = w.wampus.plotId;
+      for (let tt = 0; tt < 300000; tt += 10) {
+        go(state, w, { x: 0, y: 0 }, 10); since += 10;
+        if (w.wampus.visible !== vis) {
+          spans.push({ vis, ms: since, from: plot, to: w.wampus.plotId }); vis = w.wampus.visible; since = 0; plot = w.wampus.plotId;
+          if (!mountainIds(state).includes(plot)) return { bad: `plot ${plot} is not a mountain` };
+        }
+      }
+      return { spans: spans.slice(1), u: w.unitMs }; // the first span is the initial delay
+    };
+    let stays = 0; let moves = 0;
+    for (const seed of ['wa-1', 'wa-2', 'wa-3']) {
+      const r = trace(seed); if (r.bad) return r.bad;
+      for (const sp of r.spans) {
+        const ptu = sp.ms / r.u;
+        if (sp.vis) { if (!(ptu > 0.98 && ptu < 4.02)) return `visible ${ptu} PTU`; if (Math.abs(ptu - Math.round(ptu)) > 0.02) return `visible not whole PTU: ${ptu}`; continue; }
+        if (Math.abs(ptu - 2) < 0.02) moves += 1;
+        else if (ptu > 3.98 && ptu < 7.02 && Math.abs(ptu - Math.round(ptu)) < 0.02) { stays += 1; if (sp.to !== sp.from) return `stayed ${ptu} PTU but moved ${sp.from} -> ${sp.to}`; }
+        else return `hidden ${ptu} PTU`;
+      }
+    }
+    if (stays < 5 || moves < 5) return `stays ${stays} moves ${moves}`;
+    return JSON.stringify(trace('wa-1')) === JSON.stringify(trace('wa-1')) ? true : 'same seed, different wampus';
+  });
+  t('Wampus: [manual][Atari code] standing on his mountain keeps him from opening his door', () => {
+    const { state } = fresh('wampus-stand'); const w = DevWalk.create(state, 'p0', 600000);
+    w.wampus = WampusSystem.create(state, 'p0', 0, false);
+    const id = w.wampus.plotId; standOn(state, w, id);
+    for (let tt = 0; tt < 120000; tt += 10) { go(state, w, { x: 0, y: 0 }, 10); if (w.wampus.visible && w.wampus.plotId === id) return `appeared under the colonist at ${tt} ms`; }
+    return true;
+  });
+  t('Wampus: Acció on his plot (no RUC in tow) catches him: reward, the C64 message, once per turn, the turn goes on', () => {
+    const { state, w } = wampusVisible(); state.turn = 5;
+    if (!w.wampus.visible) return 'setup: not visible';
+    const cash0 = playerById(state, 'p0').cash; const other = mountainIds(state).find((id) => id !== w.wampus.plotId);
+    standOn(state, w, other);
+    if (DevWalk.act(state, w) === 'wampus') return 'caught from another mountain';
+    standOn(state, w, w.wampus.plotId);
+    if (DevWalk.act(state, w) !== 'wampus') return `not caught: ${w.msg}`;
+    if (playerById(state, 'p0').cash !== cash0 + 200) return `cash ${playerById(state, 'p0').cash - cash0}`;
+    if (w.msg !== "Has caçat el Wampus de muntanya!! T'ha donat el seu cofre: 200 cr perquè el deixis lliure.") return `msg ${w.msg}`;
+    if (w.ended || w.wampus.visible) return 'the turn ended or he is still there';
+    for (let tt = 0; tt < 120000; tt += 10) { go(state, w, { x: 0, y: 0 }, 10); if (w.wampus.visible) return 'appeared again after the catch'; }
+    return audited(state);
+  });
+  t('Wampus: never caught while leading a RUC, from town, or while hidden; Beginner has him too [PROVISIONAL]', () => {
+    let { state, w } = wampusVisible('wampus-no');
+    standOn(state, w, w.wampus.plotId); w.carrying = { module: 'food', paid: 100 }; state.store.ruc -= 1;
+    if (DevWalk.act(state, w) === 'wampus' || w.wampus.caught) return 'caught while leading a RUC';
+    ({ state, w } = wampusVisible('wampus-town'));
+    if (DevWalk.act(state, w) === 'wampus') return 'caught from town';
+    ({ state, w } = wampusVisible('wampus-hid')); standOn(state, w, w.wampus.plotId); w.wampus.visible = false;
+    if (DevWalk.act(state, w) === 'wampus') return 'caught while hidden';
+    ({ state, w } = wampusVisible('wampus-beg', 'beginner')); standOn(state, w, w.wampus.plotId);
+    return DevWalk.act(state, w) === 'wampus' ? true : 'Beginner: no wampus';
+  });
+  t('Wampus: the game times the wait before the start button, gives only the human a wampus, rings his bell and plays the catch', () => {
+    const g = mkGame(); const spy = { log: [], play(k) { this.log.push(k); }, music() {}, stopMusic() {}, hold() {}, soundChanged() {}, unlock() {} }; g.audio = spy; g.newGame({ seed: 'wampus-game' });
+    let guard = 0;
+    while (guard++ < 200000 && !(g.turns.phase === 'DEVELOPMENT' && g.devSlot() && g.devSlot().pid === 'p0')) { if (g.turns.phaseData.skippable) g.skipPhase(); g.tick(50); }
+    const slot = g.devSlot(); if (!slot || slot.stage !== 'ready') return 'no ready prompt';
+    for (let i = 0; i < 20; i++) g.tick(50);
+    if (!(slot.waitMs >= 1000)) return `waitMs ${slot.waitMs}`;
+    g.devStart(); const w = g.humanWalk(); const wp = w.wampus;
+    if (!wp) return 'the human has no wampus';
+    const ptu = WampusSystem.firstDelayPtu(slot.waitMs, !!slot.event);
+    if (Math.abs(wp.t - ptu * w.unitMs) > 1) return `first delay ${wp.t} ms, expected ${ptu} PTU`;
+    spy.log.length = 0; wp.t = 10; g.tick(50);
+    if (!wp.visible || !spy.log.includes('wampus_bell')) return `no bell: ${spy.log}`;
+    standOn(g.state, w, wp.plotId); g.devAction(); g.tick(50);
+    return spy.log.includes('wampus') && wp.caught ? true : `catch sound: ${spy.log}`;
+  });
+  t('Wampus: a save mid-walk restores him exactly (the hunt continues the same way)', () => {
+    const g = mkGame(); g.newGame({ seed: 'wampus-save' });
+    let guard = 0;
+    while (guard++ < 200000 && !g.humanWalk()) { if (g.turns.phaseData.skippable) g.skipPhase(); const sl = g.devSlot(); if (sl && sl.stage === 'ready') g.devStart(); g.tick(50); }
+    if (!g.humanWalk() || !g.humanWalk().wampus) return 'no walk with a wampus';
+    for (let i = 0; i < 100; i++) g.tick(50);
+    g.snapshotPhase(); const h = mkGame(); h.resume(SaveSystem.deserialize(SaveSystem.serialize(g.state, g.rng)));
+    if (JSON.stringify(h.humanWalk().wampus) !== JSON.stringify(g.humanWalk().wampus)) return 'wampus lost by the save';
+    for (const G of [g, h]) for (let i = 0; i < 300; i++) G.tick(50);
+    return JSON.stringify(h.humanWalk().wampus) === JSON.stringify(g.humanWalk().wampus) ? true : 'the hunt diverged after resuming';
+  });
+  t('Wampus: a flashing point of light on the map; Reduir moviment keeps a steady glow', () => {
+    const flash = [0, 100, 200, 300, 400, 500].map((n) => MapScreen.wampusGlow(n, false));
+    if (new Set(flash).size < 2 || flash.some((a) => !(a > 0))) return `flashing ${flash}`;
+    const steady = [0, 100, 200, 300, 400, 500].map((n) => MapScreen.wampusGlow(n, true));
+    return new Set(steady).size === 1 && steady[0] === 1 ? true : `steady ${steady}`;
+  });
+
   /* ---------- saves, conservation, determinism, engine ---------- */
-  t('Save: schema 6 round trip keeps state (level, species, land sales, land-auction prices, store prices, event bag) and PRNG; schemas 1-5 (old rules) and corrupt saves are refused', () => {
-    if (CONFIG.SCHEMA_VERSION !== 6) return `schema ${CONFIG.SCHEMA_VERSION}`;
+  t('Save: schema 7 round trip keeps state (level, species, land sales, land-auction prices, store prices, event bag) and PRNG; schemas 1-6 (old rules) and corrupt saves are refused', () => {
+    if (CONFIG.SCHEMA_VERSION !== 7) return `schema ${CONFIG.SCHEMA_VERSION}`;
     const { state, rng } = fresh('save'); rng.next(); rng.next();
     state.turn = 4; state.phase = 'DEVELOPMENT'; state.storePrice.food = 33; state.events.bag.pirates = 1; state.events.used[13] = 1; state.landAuction.lastAvg = 222;
     const text = SaveSystem.serialize(state, rng);
@@ -1356,7 +1477,7 @@ function runSelfTests() {
     if (back.state.events.bag.pirates !== 1 || back.state.events.used[13] !== 1) return 'event bag / used flags lost';
     if (back.state.level !== 'standard' || back.state.players[0].species !== 'mechtron' || !Array.isArray(back.state.landSales)) return 'level / species / land sales lost';
     if (back.state.landAuction.lastAvg !== 222) return 'land-auction price lost';
-    for (const v of [1, 2, 3, 4, 5]) {
+    for (const v of [1, 2, 3, 4, 5, 6]) {
       const old = SaveSystem.deserialize(JSON.stringify({ schemaVersion: v, turn: 3 }));
       if (!old.incompatible || old.reason !== 'old_rules') return `schema ${v}: ${JSON.stringify(old)}`;
     }

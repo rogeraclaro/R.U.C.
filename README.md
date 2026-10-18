@@ -91,6 +91,11 @@ alenteixen ([codi Atari] 6 / 14 / 21 fotogrames per pas: plana / riu / muntanya)
   avisa); si s'acaba el temps (o acabes el torn) portant-ne un, **fuig**. Es perd a l'instant (no torna al corral, no es retorna res); l'espurneig i la sortida corrents
   que es veuen després només són l'animació.
 - Clicar el mapa no instal·la mai res: durant el desenvolupament només mostra la informació de la parcel·la.
+- **Wampus de muntanya** ([codi Atari], [manual], [C64]; també al Principiant [PROVISIONAL]): viu a les coves de les muntanyes; quan obre
+  la porta sona una campaneta i parpelleja un punt de llum en una muntanya (amb «Reduir moviment», una llum fixa). Fora del poble i
+  sense cap RUC, posa't sobre la seva parcel·la i prem **Acció**: «Has caçat el Wampus de muntanya!! T'ha donat el seu cofre: N cr
+  perquè el deixis lliure.» (100 cr torns 1–3, 200 torns 4–7, 300 torns 8–11, 400 torn 12). Un cop per torn; el torn **continua**.
+  Si ets a la seva muntanya no obre la porta. Els ordinadors no el cacen mai.
 
 ## Controls
 
@@ -101,7 +106,7 @@ alenteixen ([codi Atari] 6 / 14 / 21 fotogrames per pas: plana / riu / muntanya)
 | Començar el torn de desenvolupament | clic al mapa o botó «Començar» | `Enter` o `Espai` |
 | Caminar (desenvolupament) | mantén premudes les fletxes en pantalla (panell inferior) | fletxes (en diagonal, dues alhora) |
 | Pub / oficina de terres / corral / tallers | camina fins a la porta i empeny-hi uns instants | fletxes |
-| Acció (instal·lar / retirar / marcar parcel·la per vendre) | botó «Acció» | `Enter` o `Espai` |
+| Acció (instal·lar / retirar / marcar parcel·la per vendre / caçar el Wampus) | botó «Acció» | `Enter` o `Espai` |
 | Acabar el torn de desenvolupament | botó «Acabar» (avisa si el RUC fugirà) | `Tab` fins al botó i `Enter` |
 | Subhasta: declaració | botons COMPRADOR / VENEDOR / FORA, o toc a la meitat esquerra / dreta del teu carril | `↑`/`→` venedor, `↓`/`←` comprador, `Espai` fora |
 | Subhasta: preu (després de declarar) | arrossega al teu carril, control vertical, roda o botons «Preu ▲/▼» | `↑` / `↓` (mantén-ho premut; `Maj` = ×3) |
@@ -122,7 +127,7 @@ músiques i efectes són composicions pròpies**; no s'ha copiat ni derivat res 
   subhastes (els temes `land`, `development` i `auction` existeixen però no es fan servir). La pausa deixa la música en suspens i
   «So: no» la talla a l'instant.
 - **Efectes**: tic del cursor de terra i reclamació; passes, bram en comprar un RUC, fugida, porta dels edificis, equipament,
-  instal·lació i premi del pub; inici de torn, avís quan queda ~10 % del temps i fi del temps; declaració, tic de subhasta, cada unitat
+  instal·lació i premi del pub; campaneta del Wampus quan obre la porta i cofre quan el caces; inici de torn, avís quan queda ~10 % del temps i fi del temps; declaració, tic de subhasta, cada unitat
   negociada i tancament (també a la subhasta de terres); un efecte per a cada esdeveniment planetari i un de bo o dolent per als
   personals; la nau aterra a l'inici i s'envola al final.
 
@@ -135,11 +140,11 @@ rellotge del joc. A la pantalla final, **Repetir llavor** i **Nova llavor**. Amb
 
 ## Desat
 
-Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **6**: nivell, espècie, parcel·les en venda, preu de l'última subhasta de terres, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
+Desat automàtic a `localStorage` (clau `ruc-save-v1`, esquema **7**: nivell, espècie, parcel·les en venda, preu de l'última subhasta de terres, bossa d'esdeveniments planetaris i esdeveniments personals ja sortits) a cada frontera de fase, entre colon i colon del desenvolupament i a cada torn.
 **Continuar** al títol reprèn a la fase desada.
 
 «Desa i surt al títol» (menú de pausa) escriu un desat exacte a les fases **represables**: cursa de terra, desenvolupament (posició, RUC que
-portes, rellotge, ordre i esdeveniments ja sortejats), subhastes de terres (parcel·la, ofertes, temps, IA) i subhastes de béns (declaració o negociació, marcadors, contacte, IA). A la resta de fases es manté
+portes, rellotge, Wampus, ordre i esdeveniments ja sortejats), subhastes de terres (parcel·la, ofertes, temps, IA) i subhastes de béns (declaració o negociació, marcadors, contacte, IA). A la resta de fases es manté
 l'últim desat de frontera, perquè tornar-hi a mitja fase podria aplicar-ne els efectes dues vegades. La liquidació del torn queda desada
 a l'estat (`settlement`) i no es torna a executar mai.
 
@@ -163,7 +168,7 @@ ruc/
 │   ├── core/         config.js (CONFIG, FEATURES, enums, RESOURCE_DEFS, EVENT_DEFS…), rng.js, assets.js
 │   ├── state/        models de dades: Plot, PlayerState, StoreState, ResourceLedger + RucAudit, GameState
 │   ├── systems/      lògica pura: torn, botiga, terra (i oficina de terres), producció, consum, liquidació, esdeveniments,
-│   │                 puntuació, pub, desat, subhasta, subhasta de terres, IA, ordre i caminada de desenvolupament (poble)
+│   │                 puntuació, pub, Wampus, desat, subhasta, subhasta de terres, IA, ordre i caminada de desenvolupament (poble)
 │   ├── ui/           hud.js (colors, formats, Hud), species-art.js, overlays.js, input.js, audio.js, renderer.js
 │   ├── screens/      title, setup, map, production, report, auction, land-auction, gameover
 │   ├── tests.js      runSelfTests (?test=1)
@@ -301,6 +306,7 @@ Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
 | Nivells: Principiant 6 torns, Estàndard 12; Torneig desactivat | codi Atari, C64 | `CONFIG.LEVELS`, `lastRound` |
 | Espècies: Flapper 1600 cr i +2 BTU per unitat, Humanoid 600 cr i −2 BTU, la resta 1000 cr; ordinadors = Mechtrons amb 1000 cr | codi Atari, C64 | `CONFIG.SPECIES`, `ConsumptionSystem.unitFrames` |
 | Pub: bonificació 50/100/150/200 + (aleatori 0..255 mod 2 × unitats que queden), 250 si la suma passa de 255; acaba el torn | codi Atari, C64 | `PubSystem`, `DevWalk.enter` |
+| Wampus: recompensa 100 × (torn / 4 enter + 1); primera aparició després de Ta/4 unitats (Ta = BTU esperats abans de prémer el botó, màx. 255; −100 si hi ha hagut esdeveniment personal); visible 1–4 unitats, després amagat: 50 % es queda 4–7 unitats, 50 % canvia a una muntanya a l'atzar al cap de 2 unitats; no surt si ets a la seva muntanya; un cop per torn, mai portant un RUC, els ordinadors mai; caçar-lo no acaba el torn | codi Atari, manual, C64 | `WampusSystem`, `DevWalk.act`, `MapScreen.drawWampus` |
 | IA: instal·la mentre li queden ≥ 35 unitats (cada instal·lació costa 25 + 2 × distància al poble) i després va al pub si en queden ≥ 3 | codi Atari | `AISystem.turn` |
 | «Prem el botó per començar» i barra de temps vertical del color del jugador a la dreta del mapa | C64 | `Game.devStart`, `MapScreen.timeBar` |
 | Poble: crystite (tancat) · smithore · energia · menjar / assaig (tancat) · oficina de terres · pub · corral «RUCs 100 cr»; «Els teus diners» a sota | C64 | `TOWN`, `MapScreen.drawTown` |
@@ -370,6 +376,7 @@ Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
 | Empat de patrimoni en l'ordre de desenvolupament i a la subhasta | no consta | ordre de jugador estable; a la subhasta, temps d'espera i clau sembrada | baixa | — |
 | Velocitat vertical al poble i geometria del poble | C64: només s'ha mesurat l'horitzontal (1,33 px/fotograma) | 0,667 px/fotograma en vertical (la meitat, com al mapa); carrer i passatge propis amb l'ordre d'edificis del C64 | baixa | Cronometrar recorreguts verticals al poble en emulador |
 | «No s'hi admeten RUCs» al pub i a l'oficina de terres | C64: la cadena «NO MULES ALLOWED» existeix, però no se sap a quins edificis surt | no s'hi pot entrar amb un RUC (no fuig) | baixa | Entrar al pub amb un RUC en emulador |
+| Wampus: ordre entre el sostre de 255 BTU i el −100 de l'esdeveniment, arrodoniment a unitats senceres, punt exacte de la llum dins la parcel·la, caçar-lo amb Acció sobre la parcel·la, i el Principiant | codi Atari: les regles; manual: «salta-hi a sobre» i «si prems el botó el fas fora» (no es reprodueix) | sostre i després −100 (mínim 0), unitats senceres a la baixa, cantonada superior dreta, Acció en qualsevol punt de la parcel·la; també al Principiant | baixa | Caçar el Wampus en emulador (Estàndard i Principiant) |
 | Rellotge a l'oficina de terres | manual: el temps s'atura mentre marques la parcel·la | el rellotge continua corrent | baixa | Comprovar-ho en emulador |
 | Fi del torn portant un RUC al Principiant | codi Atari: només documenta que un premut equivocat «només avisa» | fuig igual que a l'Estàndard | baixa | Esgotar el temps amb un RUC al Principiant |
 | Valors de la IA (reacció 400–900 ms, error ±8 %, reserva 3) i comportament a la subhasta | l'original no té nivells de IA i no se n'ha transcrit el comportament de subhasta | antics valors «Colònia» (`CONFIG.AI`); a la subhasta de béns deixa de comprar / vendre en arribar al seu límit | — | Transcriure la IA de subhasta del desassemblatge |
@@ -378,11 +385,11 @@ Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
 
 ### Ajornat (fora d'aquest encàrrec)
 
-- Fase B: crystite, assay, collusion, wampus (`FEATURES.crystite` i `FEATURES.wampus` a `false`; el preu del crystite no s'ha tocat).
+- Fase B: crystite, assay, collusion (`FEATURES.crystite` a `false`; el preu del crystite no s'ha tocat).
 
 ## Fase B (preparada, no visible)
 
-`FEATURES.crystite` i `FEATURES.wampus` són `false` i no es mostra cap control (`FEATURES.landAuctions` ja és `true`). Els punts d'extensió existeixen:
+`FEATURES.crystite` és `false` i no es mostra cap control (`FEATURES.landAuctions` ja és `true`). Els punts d'extensió existeixen:
 `RESOURCE.CRYSTITE` a `RESOURCE_DEFS` amb `enabled:false` (producció, malbaratament i subhasta recorren el registre; `AUCTION_ORDER` ja
 reserva el lloc del crystite entre smithore i menjar); `hiddenDeposit` a cada parcel·la; `TurnSystem.insertAfter/insertBefore` i el hook
 `afterDevelopment`; `InputManager` amb contexts independents; `AuctionEngine` rep una `marketDefinition` i lots genèrics

@@ -242,11 +242,13 @@ class Game {
   devStart() {
     const s = this.devSlot(); if (!s || s.stage !== 'ready' || this.paused || this.helpOpen) return;
     s.stage = 'walk'; s.walk = DevWalk.create(this.state, s.pid, ConsumptionSystem.humanTimeMs(this.state, playerById(this.state, s.pid)));
+    // [Atari code] the Wampus's first appearance depends on how long the prompt waited (WampusSystem.firstDelayPtu).
+    s.walk.wampus = WampusSystem.create(this.state, s.pid, s.waitMs || 0, !!s.event);
     this.audio.play('turn_start');
   }
   devFeedback(w) {
     const kind = w.log[w.log.length - 1];
-    const fx = { buy: 'ruc_bray', outfit: 'outfit', install: 'install', flee: 'ruc_flee', pub: 'pub_win' }[kind];
+    const fx = { buy: 'ruc_bray', outfit: 'outfit', install: 'install', flee: 'ruc_flee', pub: 'pub_win', wampus: 'wampus' }[kind];
     this.audio.play(fx || (w.bad ? 'error' : 'click'));
     if (w.msg) this.announce(w.msg);
   }
@@ -259,6 +261,11 @@ class Game {
     if ((d.x || d.y) && !w.visiting && !w.installing && !w.fleeing) {
       rt.stepMs = (rt.stepMs || 0) + dt;
       if (rt.stepMs >= 260) { rt.stepMs = 0; this.audio.play('walk_step'); }
+    }
+    // [manual] "when he opens his door, his bell rings and a light flashes".
+    if (w.wampus && w.wampus.shown !== (rt.wampusShown || 0)) {
+      rt.wampusShown = w.wampus.shown;
+      if (w.wampus.visible) { this.audio.play('wampus_bell'); this.announce('Una llum parpelleja a una muntanya: el Wampus ha obert la porta!'); }
     }
     if (rt.warnedWalk !== w && w.timeLeft > 0 && w.timeLeft <= w.timeTotal * 0.1) { rt.warnedWalk = w; this.audio.play('time_warning'); }
   }
@@ -290,7 +297,7 @@ class Game {
   updateDevelopment(dt) {
     const dev = this.turns.phaseData.dev; const slot = dev.slot;
     if (!slot) { this.startDevSlot(); return; }
-    if (slot.stage === 'ready') return; // waits for the button (devStart)
+    if (slot.stage === 'ready') { slot.waitMs = (slot.waitMs || 0) + dt; return; } // waits for the button (devStart), timed for the Wampus
     if (slot.stage === 'walk') {
       const w = slot.walk;
       DevWalk.update(this.state, w, this.devDirs(), dt);
@@ -305,7 +312,7 @@ class Game {
     }
     slot.timer -= dt;
     if (slot.timer > 0) return;
-    dev.idx += 1; dev.slot = null; this.rt.walkSeq = null; this.rt.pad = { x: 0, y: 0 };
+    dev.idx += 1; dev.slot = null; this.rt.walkSeq = null; this.rt.wampusShown = 0; this.rt.pad = { x: 0, y: 0 };
     if (dev.idx >= dev.order.length) { this.turns.canAdvance = true; return; }
     // Boundary save between colonists: a reload starts the next colonist's turn (and its event draw) exactly once.
     this.save();

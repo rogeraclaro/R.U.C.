@@ -76,6 +76,7 @@ const DevWalk = {
       else if (w.fleeing) { w.fleeing.t += CONFIG.WALK.stepMs; if (w.fleeing.t >= CONFIG.WALK.fleeShuffleMs + CONFIG.WALK.fleeRunMs) this.finishFlee(w); }
       else if (w.visiting) { w.visiting.t += CONFIG.WALK.stepMs; this.stepVisit(state, w); }
       else if (dir.x || dir.y) this.move(state, w, dir);
+      if (w.wampus) WampusSystem.step(state, w, CONFIG.WALK.stepMs);
       if (w.timeLeft <= 0) this.end(state, w, 'timeout');
     }
   },
@@ -189,6 +190,9 @@ const DevWalk = {
   act(state, w) {
     if (w.ended || w.installing || w.fleeing) return null; // busy: already installing or fleeing
     if (w.area !== 'map') return this.say(w, 'Al poble, entra als edificis caminant-hi.', true);
+    // [C64] "YOU CAUGHT THE MOUNTAIN WAMPUS!! HE GAVE YOU HIS TREASURE CHEST -$n TO LET HIM GO FREE AGAIN.."
+    const won = WampusSystem.tryCatch(state, w);
+    if (won) return this.say(w, `Has caçat el Wampus de muntanya!! T'ha donat el seu cofre: ${won} cr perquè el deixis lliure.`, false, 'wampus');
     const plot = this.plotAt(state, w.x, w.y); const own = plot.ownerId === w.pid; const house = this.atHouse(w, plot);
     if (!w.carrying && w.marking) {
       if (!own) return this.say(w, 'No és la teva parcel·la.', true);

@@ -339,6 +339,16 @@ AudioManager.FX = {
     a.seq(n.map((f, i) => [f, i * 0.06, 0.05]), { vol: 0.15, duty: 0.15, s: 0.3 });
     a.voice({ wave: 'noise', rate: 2, t: 0.1, dur: 0.35, s: 0.3, vol: 0.04, filter: ['highpass', 8000] });
   },
+  wampus_bell: (a) => { // [manual] his bell rings when he opens his door: two high bell strikes
+    a.voice({ wave: 'tri', f: 2093, dur: 0.05, d: 0.25, s: 0.2, r: 0.3, vol: 0.22 });
+    a.voice({ wave: 'tri', f: 2637, t: 0.18, dur: 0.05, d: 0.25, s: 0.2, r: 0.3, vol: 0.2 });
+  },
+  wampus: (a) => { // caught: a bell strike, a rising fanfare, then the treasure chest's coins
+    a.voice({ wave: 'tri', f: 2093, dur: 0.05, d: 0.2, s: 0.2, r: 0.25, vol: 0.2 });
+    a.seq([[523, 0.1, 0.07], [659, 0.18, 0.07], [784, 0.26, 0.07], [1047, 0.34, 0.16]], { vol: 0.18, duty: 0.3, pwm: [5, 0.12] });
+    const n = [1568, 2093, 1568, 2093, 2637];
+    a.seq(n.map((f, i) => [f, 0.55 + i * 0.06, 0.05]), { vol: 0.13, duty: 0.15, s: 0.3 });
+  },
 
   // --- turn timer ---
   turn_start: (a) => a.seq([[392, 0, 0.07], [523, 0.08, 0.07], [784, 0.16, 0.16]], { vol: 0.2, duty: 0.3, pwm: [5, 0.1] }),

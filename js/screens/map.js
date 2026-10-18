@@ -96,6 +96,20 @@ class MapScreen {
     r.panel(rc.x + 8, rc.y + rc.h / 2 - 12, rc.w - 16, 24, { fill: 'rgba(6,9,18,0.85)', frame: false });
     r.text('RECLAMA', rc.x + rc.w / 2, rc.y + rc.h / 2 - 9, { size: 16, color: COL.amber, align: 'center', shadow: false });
   }
+  /** [manual] the Wampus's light flashes (alpha 1 / 0.25, ~4 Hz on the game clock); Reduir moviment: a steady glow. */
+  static wampusGlow(now, reduceMotion) { return reduceMotion ? 1 : (Math.floor(now / 120) % 2 ? 0.25 : 1); }
+  /** [manual] "The Wampus' Cave Door": a point of light on his mountain (top-right corner, clear of the RUC and the labels). */
+  drawWampus(game, r, wp) {
+    if (!wp || !wp.visible || wp.caught) return;
+    const pr = this.plotRect(game.state.plots[wp.plotId]); const c = r.ctx;
+    const x = pr.x + pr.w - 18; const y = pr.y + 20;
+    c.save(); c.globalAlpha = MapScreen.wampusGlow(game.now, game.settings.reduceMotion);
+    const g = c.createRadialGradient(x, y, 0, x, y, 18);
+    g.addColorStop(0, 'rgba(255,255,220,1)'); g.addColorStop(0.35, 'rgba(255,240,140,0.8)'); g.addColorStop(1, 'rgba(255,220,80,0)');
+    c.fillStyle = g; c.beginPath(); c.arc(x, y, 18, 0, Math.PI * 2); c.fill();
+    c.fillStyle = '#fff'; c.beginPath(); c.arc(x, y, 4, 0, Math.PI * 2); c.fill();
+    c.restore();
+  }
   plotRect(p) { return { x: CONFIG.MAP_X + p.x * CONFIG.TILE, y: CONFIG.MAP_Y + p.y * CONFIG.TILE, w: CONFIG.TILE, h: CONFIG.TILE }; }
   plotAt(game, px, py) {
     const x = Math.floor((px - CONFIG.MAP_X) / CONFIG.TILE); const y = Math.floor((py - CONFIG.MAP_Y) / CONFIG.TILE);
@@ -282,7 +296,7 @@ class MapScreen {
     r.text(game.instruction(), 16, 66, { size: 20, color: COL.amber, maxW: 860 });
     const walk = game.humanWalk();
     const inTown = !!walk && walk.area === 'town';
-    if (inTown) this.drawTown(game, r); else this.drawMap(game, r, { walk });
+    if (inTown) this.drawTown(game, r); else { this.drawMap(game, r, { walk }); if (walk) this.drawWampus(game, r, walk.wampus); }
     const land = game.landRace();
     // The whole grid is one focusable region. Clicking a plot never installs anything (no remote installation): it only claims in
     // the land race (on pointer DOWN) and shows the tooltip.
@@ -408,7 +422,8 @@ class MapScreen {
       const carry = walk.installing ? 'Instal·lant el RUC…' : walk.fleeing ? 'El RUC fuig!' : walk.visiting ? 'El RUC entra a dins...'
         : cr ? `Portes un RUC ${cr.module ? `equipat per a ${resLabel(cr.module).toLowerCase()}` : 'sense equipar'} (robot: ${cr.paid} cr)` : 'No portes cap RUC';
       r.text(carry, X + 12, Y + 8, { size: 18, color: busy ? COL.amber : cr ? COL.amber : COL.text, maxW: 660 });
-      r.text(walk.msg || (walk.area === 'town' ? 'Camina dins dels edificis per usar-los. Surt per les vores obertes.' : 'Acció sobre la casa d\'una parcel·la teva: instal·la o retira un RUC.'), X + 12, Y + 36, { size: 16, color: walk.bad ? COL.bad : COL.dim, maxW: 660 });
+      // Wraps: the longest message (the Wampus's treasure chest) needs two lines above the buttons.
+      r.wrap(walk.msg || (walk.area === 'town' ? 'Camina dins dels edificis per usar-los. Surt per les vores obertes.' : 'Acció sobre la casa d\'una parcel·la teva: instal·la o retira un RUC.'), X + 12, Y + 32, 660, 19, { size: 16, color: walk.bad ? COL.bad : COL.dim });
       r.text(`${MapScreen.timeBar(s, walk).units} u`, X + 650, Y + 8, { size: 18, color: who.color, align: 'right' });
       r.button('d-act', 'Acció (Enter)', X + 12, Y + 72, 200, 40, { primary: true, disabled: busy, onClick: () => game.devAction() });
       r.button('d-end', cr ? 'Acabar (el RUC fugirà)' : 'Acabar el torn', X + 222, Y + 72, 250, 40, { onClick: () => game.devFinish() });
