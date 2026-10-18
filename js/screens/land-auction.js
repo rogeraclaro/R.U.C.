@@ -62,7 +62,7 @@ class LandAuctionScreen {
       const lx = this.laneX(i); const bid = la.bids[p.id];
       ctx.strokeStyle = p.color; ctx.globalAlpha = 0.35; ctx.lineWidth = 2; ctx.strokeRect(lx + 0.5, AUC.top - 24, AUC.laneW, AUC.bottom - AUC.top + 48); ctx.globalAlpha = 1;
       r.glyph(p.shape, lx + 14, AUC.top - 40, 8, p.color, '#05070d');
-      r.text(p.name, lx + 28, AUC.top - 50, { size: 16, maxW: 110 });
+      r.text(p.name, lx + 28, AUC.top - 50, { size: 16, maxW: 116, fit: true });
       r.text(bid ? 'POSTOR' : 'VENEDOR', lx + 6, AUC.top - 26, { size: 16, color: bid ? COL.text : COL.amber });
       if (bid) {
         const y = py(bid.price); const bx = lx + 60;

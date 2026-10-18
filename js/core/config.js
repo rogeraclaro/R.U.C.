@@ -97,11 +97,12 @@ const CONFIG = deepFreeze({
   // [C64] the turn starts when the player presses the button ("PRESS YOUR STICK BUTTON TO START"): there is no countdown.
   DEV: { lowCorral: 7, unitBtu: 7, btuFrames: 4, palHz: 50.125, baseUnits: 10, foodUnits: 91 },
   // [Atari code] computer turn: keeps installing while >= aiMinUnits are left; each install costs aiInstallUnits + aiDistUnits x
-  // distance (plots from the town); then the pub if >= pubMinUnits are left.
-  PUB: { pubMinUnits: 3, aiMinUnits: 35, aiInstallUnits: 25, aiDistUnits: 2, cap: 250, overflow: 255 },
+  // calcPlotDistFromStore (1..5, AISystem.storeDist; decreaseTimeFromAction shifts it left twice); then the pub if >= pubMinUnits are left.
+  PUB: { pubMinUnits: 3, aiMinUnits: 35, aiInstallUnits: 25, aiDistUnits: 4, cap: 250, overflow: 255 },
   // Crystite ([Atari code], Tournament only, see CrystiteSystem): 3 seeds of level 3 (HIGH); store price 50 + rand(0..99) each round.
-  // Computer assay: 10 + 2 x distance PTU each, not under 22 PTU left, none once 3 HIGH plots are known, 1/8 pick chance per candidate.
-  CRYSTITE: { seeds: 3, high: 3, priceBase: 50, priceRand: 100, aiUnits: 10, aiDistUnits: 2, aiMinUnits: 22, aiStopHigh: 3, aiPick: 8 },
+  // Computer assay: 10 + 4 x store distance PTU each (decreaseTimeFromAction), not under 22 PTU left, none once 3 HIGH plots are
+  // known, 1/8 pick chance per candidate.
+  CRYSTITE: { seeds: 3, high: 3, priceBase: 50, priceRand: 100, aiUnits: 10, aiDistUnits: 4, aiMinUnits: 22, aiStopHigh: 3, aiPick: 8 },
   // Walking during development. [C64] measured: map 0.667 px/frame horizontally and 0.333 vertically (a plot is ~32 x 32 C64 px:
   // ~48 / ~96 frames to cross it), town 1.33 px/frame horizontally. Scaled by TILE / c64Plot (96 / 32 = 3) to our pixels.
   // townPxPerFrame.y: [PROVISIONAL] not measured; half the horizontal speed, the same ratio as on the map ([Atari code] town step
@@ -149,7 +150,9 @@ const CONFIG = deepFreeze({
    * values, kept because they play sensibly: reaction 400-900 ms (land race and auctions), valuation error +-8 %, food / energy
    * reserve of at least 3. Not from the original code ([Atari code] documents only the grant and install rules, see AISystem).
    */
-  AI: { reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3 },
+  // minGain: [Atari code] playerTurnAi installs / re-outfits only for a rating gain >= 2 ([RE] says 3; the code compares with 2).
+  // landDollarsPerPoint: [PROVISIONAL] money per land-auction rating point (the computers' bidding is undocumented, AISystem.landValue).
+  AI: { reactMin: 400, reactMax: 900, valuationErr: 8, minReserve: 3, minGain: 2, landDollarsPerPoint: 3 },
   /*
    * [Atari code] Tournament-only computer rules (tournament.md §4.1, the only level-dependent AI branches):
    *   buyOut (auctionBuySellAi8 $AF00): Food / Energy auction with only Buyers, not the last round, store stock <= 20: a computer whose

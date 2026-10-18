@@ -553,7 +553,7 @@ function runSelfTests() {
     if (r.w.ended || !r.w.carrying || log2.join() !== 'refused' || r.w.msg !== 'No s\'hi admeten RUCs.') return `with a RUC: ended ${r.w.ended}, log ${log2}, ${r.w.msg}`;
     return audited(r.state, 1);
   });
-  t('AI turn: [Atari code] installs cost 25 + 2 x distance units while >= 35 are left, then the pub if >= 3 are left', () => {
+  t('AI turn: [Atari code] installs cost 25 + 4 x calcPlotDistFromStore units while >= 35 are left, then the pub if >= 3 are left', () => {
     const { state, rng } = fresh('aipub'); state.turn = 1; const p = state.players[1];
     [0, 8].forEach((id) => LandGrantSystem.assign(state, 'p1', id));
     setInv(state, 'p1', 'food', 0); // 10 units: no install (< 35), pub with 10 units left
@@ -563,9 +563,82 @@ function runSelfTests() {
     const { state: s2, rng: g2 } = fresh('aipub2'); s2.turn = 1; const q = s2.players[2]; setCash(s2, 'p2', 5000);
     [0, 8, 36].forEach((id) => LandGrantSystem.assign(s2, 'p2', id));
     const r2 = AISystem.turn(s2, g2, q);
-    const spent = r2.installs.reduce((acc, a) => { const pl = s2.plots[a.plotId]; return acc + 25 + 2 * (Math.abs(pl.x - CONFIG.RIVER_COL) + Math.abs(pl.y - CONFIG.TOWN_ROW)); }, 0);
+    const spent = r2.installs.reduce((acc, a) => acc + 25 + 4 * AISystem.storeDist(s2.plots[a.plotId]), 0);
     if (!r2.installs.length || r2.unitsLeft !== 101 - spent) return `installs ${JSON.stringify(r2)}`;
     return audited(s2);
+  });
+  t('AI distance: [Atari code] calcPlotDistFromStore = max(|col - 4|, 2 x |row - 2|), +1 on the river column ([RE] table 444454444 ...)', () => {
+    const rows = [0, 1, 2, 3, 4].map((y) => [0, 1, 2, 3, 4, 5, 6, 7, 8].map((x) => (x === 4 && y === 2 ? ' ' : AISystem.storeDist({ x, y }))).join(''));
+    return eq(rows.join('/'), '444454444/432232234/4321 1234/432232234/444454444', 'distances');
+  });
+  t('AI turn: [Atari code] playerTurnAi has no cash reserve and no per-colonist cap: time (>= 35 PTU) and money decide, up to 3 RUCs', () => {
+    const { state, rng } = fresh('ai3'); state.turn = 2; const p = state.players[1];
+    [12, 14, 22, 30].forEach((id) => LandGrantSystem.assign(state, 'p1', id));
+    setInv(state, 'p1', 'food', 6); setInv(state, 'p1', 'energy', 6); setCash(state, 'p1', 2000);
+    const r = AISystem.turn(state, rng, p);
+    if (r.installs.length !== 3) return `installs ${JSON.stringify(r.installs)} (units left ${r.unitsLeft})`;
+    const poor = fresh('ai3b'); poor.state.turn = 2; [12, 14].forEach((id) => LandGrantSystem.assign(poor.state, 'p1', id));
+    setInv(poor.state, 'p1', 'food', 6); setInv(poor.state, 'p1', 'energy', 6);
+    setCash(poor.state, 'p1', StoreSystem.rucPrice(poor.state) + 75); // a RUC + the dearest Standard outfit: no reserve is kept
+    const r2 = AISystem.develop(poor.state, poor.rng, poor.state.players[1]);
+    if (r2.length !== 1 || poor.state.players[1].cash !== 75 - CONFIG.MODULE_COST[r2[0].module]) return `poor: ${JSON.stringify(r2)}, cash ${poor.state.players[1].cash}`;
+    return audited(state) === true ? audited(poor.state) : audited(state);
+  });
+  t('AI turn: [Atari code] re-outfits one of its RUCs in place when the best exploitation rates >= 2 higher (only the outfit is paid)', () => {
+    const { state, rng } = fresh('aire'); state.turn = 3; const p = state.players[2];
+    const plot = state.plots.find((q) => q.terrain === TERRAIN.MOUNTAIN && q.richness === 3);
+    develop(state, 'p2', plot.id, 'food'); state.storePrice.smithore = 200; state.rucs.lost += state.store.ruc; state.store.ruc = 0;
+    setInv(state, 'p2', 'food', 8); setInv(state, 'p2', 'energy', 8); setCash(state, 'p2', 1000);
+    const acts = AISystem.develop(state, rng, p);
+    if (acts.length !== 1 || acts[0].plotId !== plot.id || acts[0].module !== 'smithore') return `acts ${JSON.stringify(acts)}`;
+    if (plot.ruc.module !== 'smithore' || p.cash !== 1000 - CONFIG.MODULE_COST.smithore || state.store.ruc !== 0) return `ruc ${JSON.stringify(plot.ruc)}, cash ${p.cash}`;
+    return audited(state);
+  });
+  t('AI turn: [Atari code] only the first scanned plot rates its current RUC for real; later ones in the simulated mode (byte_B375 left at 1)', () => {
+    const { state, rng } = fresh('aib375'); state.turn = 3; const p = state.players[1];
+    [40, 30, 20].forEach((id) => develop(state, 'p1', id, 'energy'));
+    setInv(state, 'p1', 'food', 8); setInv(state, 'p1', 'energy', 8); setCash(state, 'p1', 0); // no money: nothing is bought
+    const calls = []; const orig = AISystem.exploitationRating;
+    AISystem.exploitationRating = function (st, pl, plot, res, q, mode, bonus) { if (plot.ruc && plot.ruc.module === res && mode !== 'turn') calls.push(`${plot.id}:${mode}`); else if (plot.ruc && plot.ruc.module === res) calls.push(`${plot.id}:sim`); return orig.call(this, st, pl, plot, res, q, mode, bonus); };
+    try { AISystem.develop(state, rng, p, { units: 40 }); } finally { AISystem.exploitationRating = orig; }
+    const cur = calls.filter((c, i) => i === calls.findIndex((x) => x.split(':')[0] === c.split(':')[0]));
+    return eq(cur.slice(0, 3).join(), '40:real,30:sim,20:sim', 'current-rating modes');
+  });
+  t('AI goods quality: [Atari code] calcGoodsQuality = mean simulated price / 8 (food / energy floor 10, smithore 50; crystite (100 + 4 x round) / 8)', () => {
+    const { state } = fresh('gq'); state.turn = 2;
+    setInv(state, 'store', 'food', 200); setInv(state, 'store', 'smithore', 0); state.store.ruc = 14;
+    const q = AISystem.goodsQuality(state, 2);
+    if (q.food !== 1 || q.energy !== 1 || q.smithore !== 6) return JSON.stringify(q);
+    const t2 = fresh('gq2', 'tournament'); t2.state.turn = 5;
+    return eq(AISystem.goodsQuality(t2.state, 2).crystite, 15, 'crystite quality');
+  });
+  t('AI ratings: [Atari code] exploitation rating = quality x simulated capacity (0..8); land rating = best - store distance', () => {
+    const { state } = fresh('rate'); state.turn = 1; const p = state.players[1]; // round 1: no situation bonus
+    const river = state.plots.find((q) => q.x === 4 && q.y === 1);
+    const q = { food: 32, energy: 0, smithore: 0, crystite: 0 };
+    const best = AISystem.bestExploitation(state, p, river, q, 'land', false);
+    if (best.res !== 'food' || best.rating !== 128) return JSON.stringify(best);
+    return eq(AISystem.landRating(state, p, river, q), 125, 'land rating');
+  });
+  t('AI auction: a starving (or blacked-out) computer of any profile bids up to the store price, never stops at its profile cap', () => {
+    const bad = [];
+    for (const res of ['food', 'energy']) {
+      const { state, rng } = fresh(`aistarve-${res}`); state.turn = 6; const p = state.players[1]; // Bran: the cautious profile
+      if (res === 'energy') { develop(state, 'p1', 0, 'food'); develop(state, 'p1', 1, 'food'); }
+      setInv(state, 'p1', res, 0); setCash(state, 'p1', 3000); state.storePrice[res] = 100; setInv(state, 'store', res, 10);
+      const e = engineFor(state, rng, res, state.players.map((x) => x.id), true); e.update(10); e.units = 1; // the end of the trading time
+      const d = AISystem.decide(state, rng, p, e, {}); const ask = StoreSystem.ask(state, RESOURCE_DEFS[res]);
+      if (d.role !== ROLE.BUYER || d.target < ask) bad.push(`${res}: ${d.role} at ${d.target}, store asks ${ask}`);
+    }
+    return bad.length ? bad.join('; ') : true;
+  });
+  t('AI auction: [Atari code] food is eaten BEFORE production, so a computer below next round\'s requirement buys even with food RUCs', () => {
+    const { state, rng } = fresh('aifood'); state.turn = 4; const p = state.players[1];
+    const river = state.plots.find((q) => q.terrain === TERRAIN.RIVER); develop(state, 'p1', river.id, 'food');
+    setInv(state, 'p1', 'food', 3); setInv(state, 'p1', 'energy', 3); setCash(state, 'p1', 2000);
+    const e = engineFor(state, rng, 'food', state.players.map((x) => x.id), true, true);
+    const d = AISystem.decide(state, rng, p, e, {});
+    return d.role === ROLE.BUYER && d.limit >= 4 ? true : `decision ${JSON.stringify(d)}`;
   });
   t('Land office: [manual][C64] Standard: "Marca la parcel·la per vendre i torna" -> mark your plot -> back at the office it is stored for sale (inert)', () => {
     const { state, w } = walkState('office'); LandGrantSystem.assign(state, 'p0', 31); state.turn = 2;
@@ -916,6 +989,27 @@ function runSelfTests() {
   });
 
   /* ---------- P2.8 land ---------- */
+  t('Land grant AI: [Atari code] calcPlayerBestPlotAi keeps the best rating (a later plot wins ties, a 0 only 1/4), row penalty +1 after plot 27 / 36', () => {
+    const rng = new SeededRNG('bp'); const all = () => true;
+    const r = new Array(45).fill(0); r[10] = 20; r[30] = 20; r[40] = 21;
+    if (AISystem.bestPlot(r, 0, all, rng) !== 10) return `from 0: ${AISystem.bestPlot(r, 0, all, rng)}`; // 30 -> 19, 40 -> 19
+    if (AISystem.bestPlot(r, 28, all, rng) !== 40) return 'from 28: no penalty was earned yet, 21 must win';
+    r[12] = 20; if (AISystem.bestPlot(r, 0, all, rng) !== 12) return 'a tie must go to the later plot';
+    return AISystem.bestPlot(r, 0, (id) => id !== 12 && id !== 10, rng) === 40 ? true : 'claimed plots must be skipped';
+  });
+  t('Land grant AI: [Atari code] each computer aims at the plot of its own rating map (best exploitation - store distance), ahead of the cursor', () => {
+    const { state, rng } = fresh('lgai'); state.turn = 3;
+    const land = LandRace.create(state, rng, ['p1', 'p2', 'p3']);
+    for (const pid of ['p1', 'p2', 'p3']) {
+      const a = land.ai[pid]; if (!a) return `${pid} has no plan`;
+      const p = playerById(state, pid); const q = land.quality[pid];
+      const ratings = state.plots.map((x) => (Plot.claimable(x) ? AISystem.landRating(state, p, x, q) : 0));
+      const top = Math.max(...ratings.map((v, id) => (id >= land.cursor ? v - (id > 36 ? 2 : id > 27 ? 1 : 0) : -1)));
+      const mine = ratings[a.target] - (a.target > 36 ? 2 : a.target > 27 ? 1 : 0);
+      if (mine !== top) return `${pid} aims at ${a.target} (${mine}), best ${top}`;
+    }
+    return JSON.stringify(JSON.parse(JSON.stringify(land))) === JSON.stringify(land) ? true : 'land not JSON-safe';
+  });
   t('Land race: cursor sweeps free plots row-major, skips owned plots and the town instantly, 320 ms per free plot (Standard)', () => {
     const { state, rng } = fresh('land1');
     [0, 1, 5, 9].forEach((id) => LandGrantSystem.assign(state, 'p3', id));
@@ -1518,6 +1612,20 @@ function runSelfTests() {
   });
 
   /* ---------- whole game (real phase code, no DOM rendering) ---------- */
+  t('Input: Enter / Space with nothing focused press the screen\'s primary button (status, report, production, auction end)', () => {
+    const g = mkGame(); g.mode = 'play'; let hits = 0; const key = (k) => ({ key: k, code: k === ' ' ? 'Space' : k, preventDefault() {} });
+    g.renderer.widgets = [{ id: 'other', x: 0, y: 0, w: 10, h: 10, focusable: true, onClick: () => { hits += 100; } },
+      { id: 'rep-next', x: 0, y: 0, w: 10, h: 10, focusable: true, primary: true, onClick: () => { hits += 1; } }];
+    g.renderer.focusId = null; g.input.onKeyDown(key('Enter')); g.input.onKeyDown(key(' '));
+    if (hits !== 2) return `hits ${hits}`;
+    g.renderer.focusId = 'other'; g.input.onKeyDown(key('Enter'));
+    if (hits !== 102) return `a focused button must keep its own Enter (hits ${hits})`;
+    // The event card is a full-screen region ("Clic, Enter o Espai per continuar"): it must react without being focused first.
+    g.renderer.widgets = []; g.renderer.focusId = 's-start';
+    g.renderer.region('event-skip', 0, 0, 10, 10, { focusable: true, primary: true, onKey: (e) => { if (e.key === 'Enter') { hits += 1000; return true; } return false; } });
+    g.input.onKeyDown(key('Enter'));
+    return hits === 1102 ? true : `event card: hits ${hits}`;
+  });
   t('Game: resume mid-walk and mid-declaration continues exactly; pause freezes the walker', () => {
     const tickUntil = (G, pred, max = 200000) => {
       for (let i = 0; i < max && !pred(); i++) {
@@ -1777,15 +1885,15 @@ function runSelfTests() {
     if (DevWalk.act(state, w) !== 'sample' || say() !== 'Mostra a punt: torna a l\'oficina.') return `sample: ${say()}`;
     standOn(state, w, 30); if (DevWalk.act(state, w) !== 'one_plot' || say() !== 'Una parcel·la per viatge.') return `2nd plot: ${say()}`;
     standOn(state, w, 31); goUntil(state, w, { x: 0, y: -1 }, () => w.area === 'town');
-    visit(state, w, 'assay'); if (say() !== 'No crystite a la parcel·la #32.') return `river result: ${say()}`;
+    visit(state, w, 'assay'); if (say() !== 'Gens de crystite a la parcel·la #32.') return `river result: ${say()}`;
     state.plots[30].hiddenDeposit = 4; visit(state, w, 'assay'); leaveSouth(state, w); standOn(state, w, 30); DevWalk.act(state, w);
     standOn(state, w, 31); goUntil(state, w, { x: 0, y: -1 }, () => w.area === 'town');
     visit(state, w, 'assay'); if (say() !== 'Molt crystite a la parcel·la #31.') return `meteorite plot: ${say()}`;
     if (JSON.stringify(state.crystite.assays) !== JSON.stringify([{ pid: 'p0', plotId: 31, level: 0, turn: 0 }, { pid: 'p0', plotId: 30, level: 3, turn: 0 }])) return JSON.stringify(state.crystite.assays);
-    if (['No', 'Poc', 'Mitjà', 'Molt'].join() !== CrystiteSystem.LEVEL_NAMES.join()) return 'level names';
+    if (['Gens', 'Poc', 'Mitjà', 'Molt'].join() !== CrystiteSystem.LEVEL_NAMES.join()) return 'level names';
     return state.plots[30].hiddenDeposit === 4 ? audited(state) : 'the true level was changed';
   });
-  t('Assay office (computer): [Atari code] 10 + 2 x distance PTU each, stops under 22 PTU or with 3 HIGH known, skips river and known plots', () => {
+  t('Assay office (computer): [Atari code] 10 + 4 x store distance PTU each, stops under 22 PTU or with 3 HIGH known, skips river and known plots', () => {
     for (let i = 0; i < 20; i++) {
       const { state, rng } = fresh(`aia${i}`, T_LVL); state.turn = 2; const p = state.players[1];
       const clock = { units: 101 }; const done = CrystiteSystem.aiAssay(state, rng, p, clock);
@@ -1795,7 +1903,7 @@ function runSelfTests() {
         if (units < 22) return 'assayed with fewer than 22 PTU';
         if (noMining(id)) return `assayed river/town ${id}`;
         if (known[id] !== state.plots[id].hiddenDeposit) return `plot ${id} known ${known[id]}`;
-        units -= 10 + 2 * plotDist(id, 22);
+        units -= 10 + 4 * AISystem.storeDist(state.plots[id]);
       }
       if (new Set(done).size !== done.length) return 'assayed a plot twice';
       if (units !== clock.units) return `units ${clock.units}, expected ${units}`;
@@ -1858,10 +1966,12 @@ function runSelfTests() {
     return bad.length ? bad.join(', ') : true;
   });
   t('Tournament AI: rates known crystite (land, development) and learns it from assays, crystite RUCs and meteorites', () => {
-    const { state, rng } = fresh('taik', T_LVL); state.turn = 2; const p = state.players[1];
+    // Round 1 (no situation bonus) with plenty of food: the known HIGH crystite (quality (100 + 4) / 8 = 13, x 3) beats food / energy.
+    const { state, rng } = fresh('taik', T_LVL); state.turn = 1; const p = state.players[1]; setInv(state, 'store', 'food', 200);
     const plot = state.plots.find((q) => !noMining(q.id) && q.terrain === TERRAIN.PLAIN);
-    const before = LandGrantSystem.scorePlot(state, p, plot); CrystiteSystem.learn(state, plot.id, 3);
-    if (!(LandGrantSystem.scorePlot(state, p, plot) > before)) return 'known crystite does not raise the plot rating';
+    const q = AISystem.goodsQuality(state, 3);
+    const before = AISystem.landRating(state, p, plot, q); CrystiteSystem.learn(state, plot.id, 3);
+    if (!(AISystem.landRating(state, p, plot, q) > before)) return 'known crystite does not raise the plot rating';
     LandGrantSystem.assign(state, 'p1', plot.id); setCash(state, 'p1', 5000); setInv(state, 'p1', 'food', 20); setInv(state, 'p1', 'energy', 20);
     const acts = AISystem.develop(state, rng, p);
     if (!acts.some((a) => a.plotId === plot.id && a.module === 'crystite')) return `installs ${JSON.stringify(acts)}`;
@@ -2016,6 +2126,15 @@ function runSelfTests() {
     for (let i = 0; i < 400 && !e.trades.some((x) => x.buyer === 'p0' && x.seller === 'p1') && !e.ended; i++) g.tick(50);
     g.input.keys.delete('ArrowUp');
     return e.trades.some((x) => x.buyer === 'p0' && x.seller === 'p1') ? audited(s) : `no human-human trade: ${JSON.stringify(e.trades.slice(0, 3))}`;
+  });
+  t('Development (2 humans): P1\'s Enter / Space never start or act in P2\'s turn (only P2\'s button or a click does)', () => {
+    const g = mpGame('mp-dev');
+    if (!drive(g, () => { const sl = g.devSlot(); if (sl && sl.pid === 'p0' && sl.stage === 'ready') { g.devStart(); DevWalk.end(g.state, g.humanWalk(), 'done'); } return !!sl && sl.pid === 'p1' && sl.stage === 'ready'; })) return `no P2 slot (${g.turns.phase})`;
+    g.renderer.widgets = [{ id: 'd-start', x: 0, y: 0, w: 10, h: 10, focusable: true, primary: true, onClick: () => g.devStart() }]; g.renderer.focusId = null;
+    const pk = (c, k) => Object.assign(key(c, k), { preventDefault() {} }); g.input.onKeyDown(pk('Enter', 'Enter')); g.input.onKeyDown(pk('Space', ' '));
+    if (g.devSlot().stage !== 'ready') return 'P1\'s key started P2\'s turn';
+    g.onPlayerKey(key('KeyQ', 'q'));
+    return g.devSlot().stage === 'walk' ? true : `P2's button: ${g.devSlot().stage}`;
   });
   t('Land auction (2 humans): both bidders raise their own markers with their own keys', () => {
     const g = mpGame('mp-la');

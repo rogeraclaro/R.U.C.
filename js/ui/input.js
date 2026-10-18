@@ -81,7 +81,9 @@ class InputManager {
     }
     const r = g.renderer;
     if (e.key === 'Tab') { r.cycleFocus(e.shiftKey ? -1 : 1); r.showFocus = true; e.preventDefault(); return; }
-    const w = r.widgets.find((x) => x.id === r.focusId && !x.disabled);
+    // With nothing focused, Enter / Space press the screen's primary button (the default action: "A les subhastes", "Continuar"...).
+    const w = r.widgets.find((x) => x.id === r.focusId && !x.disabled)
+      || ((e.key === 'Enter' || e.key === ' ') ? r.widgets.find((x, i) => x.primary && !x.disabled && i >= r.modalIndex) : null);
     if (w) {
       r.showFocus = true;
       if (w.onKey && w.onKey(e)) { e.preventDefault(); return; }

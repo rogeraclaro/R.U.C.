@@ -200,7 +200,7 @@ const DevWalk = {
     if (w.assay.plotId === null) return this.say(w, 'Cal una mostra.', true, 'assay_need');
     const id = w.assay.plotId; w.assay = null;
     const level = CrystiteSystem.record(state, w.pid, id);
-    return this.say(w, `${CrystiteSystem.LEVEL_NAMES[level]} crystite a la parcel·la #${id + 1}.`, false, 'assay_result');
+    return this.say(w, `${level ? CrystiteSystem.LEVEL_NAMES[level] : 'Gens de'} crystite a la parcel·la #${id + 1}.`, false, 'assay_result');
   },
   /**
    * [Atari code] $6B6F-$6BA3: with a sample requested, the button on ANY plot (owned or not: ownership is not checked) takes it,

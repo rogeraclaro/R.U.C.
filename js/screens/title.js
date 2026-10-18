@@ -11,6 +11,6 @@ class TitleScreen {
     if (SaveSystem.has()) { r.button('t-cont', 'Continuar', x, y, 340, 56, { size: 22, onClick: () => game.continueGame() }); y += 70; }
     r.button('t-help', 'Com es juga', x, y, 340, 56, { size: 22, onClick: () => game.toggleHelp() }); y += 70;
     r.button('t-sound', game.settings.sound ? 'So: sí' : 'So: no', x, y, 340, 56, { size: 22, onClick: () => game.toggleSound() });
-    r.text('Ratolí, teclat (Tab, fletxes, Enter, Espai, Esc), tacte o comandament. J2: W A S D + Q · J3: I J K L + U · J4: teclat numèric 8 4 5 6 + 0.', 64, 660, { size: 16, color: COL.dim, maxW: 1150 });
+    r.text('Ratolí, teclat (Tab, fletxes, Enter, Espai, Esc), tacte o comandament. J2: W A S D + Q · J3: I J K L + U · J4: teclat numèric 8 4 5 6 + 0.', 64, 660, { size: 16, color: COL.dim, maxW: 1150, fit: true });
   }
 }

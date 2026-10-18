@@ -313,7 +313,7 @@ class Game {
     } else {
       if (ev) slot.log.push(`${p.name}: ${ev.text}`);
       const turn = AISystem.turn(s, this.rng, p);
-      turn.installs.forEach((a) => slot.log.push(`${p.name}: RUC de ${resLabel(a.module).toLowerCase()} a la parcel·la ${a.plotId + 1}`));
+      turn.installs.forEach((a) => slot.log.push(a.reoutfit ? `${p.name}: reequipa el RUC de la parcel·la ${a.plotId + 1} per a ${resLabel(a.module).toLowerCase()}` : `${p.name}: RUC de ${resLabel(a.module).toLowerCase()} a la parcel·la ${a.plotId + 1}`));
       if (!turn.installs.length) slot.log.push(`${p.name} no instal·la cap RUC aquest torn.`);
       if (turn.assays.length) slot.log.push(`${p.name} fa ${turn.assays.length === 1 ? 'un assaig' : `${turn.assays.length} assaigs`} de crystite.`);
       if (turn.pub) slot.log.push(`${p.name} va al pub i guanya ${turn.pub} cr jugant.`);

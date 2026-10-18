@@ -43,7 +43,7 @@ class SetupScreen {
       const x = 180 + i * 306;
       r.button(`s-lvl-${id}`, L.label, x, 558, 290, 44, { checked: st.level === id, disabled: !!L.disabled, onClick: () => { st.level = id; } });
       const note = L.disabled ? L.note : id === 'beginner' ? '6 mesos · regles simplificades' : id === 'tournament' ? '12 mesos · crystite i col·lusió' : '12 mesos · regles completes';
-      r.text(note, x, 606, { size: 16, color: COL.dim, maxW: 290 });
+      r.text(note, x, 606, { size: 16, color: COL.dim, maxW: 290, fit: true });
     });
     const rivals = CONFIG.AI_NAMES.slice(0, 4 - st.humans).map((a) => a.name);
     r.text(rivals.length ? `Ordinadors (Mechtrons): ${rivals.join(', ')}. Mateixa llavor, mateix resultat.` : 'Quatre jugadors humans: cap ordinador.', 180, 630, { size: 16, color: COL.dim, maxW: 920 });

@@ -92,11 +92,11 @@ class Renderer {
     c.fillRect(x, y, w, h);
     c.strokeStyle = o.disabled ? '#2a3348' : o.checked ? COL.good : o.primary ? COL.cyan : COL.border; c.lineWidth = o.checked ? 3 : 2; c.strokeRect(x + 1, y + 1, w - 2, h - 2);
     this.text(`${o.checked ? '✓ ' : ''}${label}`, x + w / 2, y + (h - (o.size || 18)) / 2 - 1, { size: o.size || 18, align: 'center', color: o.disabled ? COL.textOff : COL.text, maxW: w - 10, shadow: false });
-    this.widgets.push({ id, x, y, w, h, label, disabled: !!o.disabled, focusable: !o.disabled, onClick: o.onClick, onDown: o.onDown });
+    this.widgets.push({ id, x, y, w, h, label, disabled: !!o.disabled, focusable: !o.disabled, primary: !!o.primary, onClick: o.onClick, onDown: o.onDown });
     this.focusRing(id, x, y, w, h);
   }
   region(id, x, y, w, h, o = {}) {
-    this.widgets.push({ id, x, y, w, h, label: o.label, focusable: !!o.focusable, onClick: o.onClick, onDown: o.onDown, onMove: o.onMove, onUp: o.onUp, onWheel: o.onWheel, onKey: o.onKey });
+    this.widgets.push({ id, x, y, w, h, label: o.label, focusable: !!o.focusable, primary: !!o.primary, onClick: o.onClick, onDown: o.onDown, onMove: o.onMove, onUp: o.onUp, onWheel: o.onWheel, onKey: o.onKey });
     if (o.focusable) this.focusRing(id, x, y, w, h);
   }
   textField(id, value, x, y, w, h, o) {

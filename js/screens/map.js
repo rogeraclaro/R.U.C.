@@ -63,7 +63,8 @@ class MapScreen {
     if (game.turns.phase === 'DEVELOPMENT') {
       const slot = game.devSlot();
       // P1's keys only act in P1's own turn; the other humans use their own keys (Game.onPlayerKey).
-      if (!slot || slot.pid !== game.pidOfSeat(0)) return false;
+      // ... and are swallowed in another colonist's turn, so they never reach that turn's default button (Començar / Acció).
+      if (!slot || slot.pid !== game.pidOfSeat(0)) return action && !onButton;
       if (slot.stage === 'ready' && action && (!onButton || f === 'd-start')) { game.devStart(); return true; }
       if (!game.humanWalk()) return false;
       if (e.key.startsWith('Arrow')) return true;
@@ -294,10 +295,10 @@ class MapScreen {
         lines.push('La collita real varia al voltant de la mitjana');
       }
     }
-    const w = 460; const h = 12 + lines.length * 24;
+    const w = 600; const h = 12 + lines.length * 24;
     const x = clamp(px + 16, 8, CONFIG.W - w - 8); const y = clamp(py + 16, 60, CONFIG.H - h - 8);
     r.panel(x, y, w, h, { fill: 'rgba(6,9,18,0.96)', frame: false });
-    lines.forEach((l, i) => r.text(l, x + 10, y + 8 + i * 24, { size: 16, maxW: w - 20 }));
+    lines.forEach((l, i) => r.text(l, x + 10, y + 8 + i * 24, { size: 16, maxW: w - 20, fit: true }));
   }
   draw(game, r) {
     const s = game.state;
@@ -358,7 +359,7 @@ class MapScreen {
       const many = game.humanIds().length > 1;
       SpeciesArt.draw(r, p.species, X + 8, y + 8, 64, p.color, portraitFrame(p));
       r.glyph(p.shape, X + 86, y + 20, 9, p.color, '#05070d');
-      r.text(`${p.name}${p.isHuman ? (many ? ` (J${p.keys + 1})` : ' (tu)') : ''}`, X + 102, y + 8, { size: 18, maxW: 150 });
+      r.text(`${p.name}${p.isHuman ? (many ? ` (J${p.keys + 1})` : ' (tu)') : ''}`, X + 102, y + 8, { size: 18, maxW: 162, fit: true });
       r.text(speciesById(p.species).label, X + 102, y + 32, { size: 16, color: COL.dim, maxW: 120 });
       r.text(fmtCr(p.cash), X + W - 10, y + 8, { size: 18, color: COL.amber, align: 'right' });
       if (land) {
@@ -503,7 +504,7 @@ class MapScreen {
       r.text('Esdeveniment original (C64)', x + w / 2, y + 430, { size: 16, color: COL.dim, align: 'center', maxW: w - 20 });
     });
     const skip = () => game.skipPhase();
-    r.region('event-skip', 0, 0, CONFIG.W, CONFIG.H, { focusable: true, label: 'Salta la targeta', onClick: skip, onKey: (e) => { if (e.key === 'Enter' || e.key === ' ') { skip(); return true; } return false; } });
+    r.region('event-skip', 0, 0, CONFIG.W, CONFIG.H, { focusable: true, primary: true, label: 'Salta la targeta', onClick: skip, onKey: (e) => { if (e.key === 'Enter' || e.key === ' ') { skip(); return true; } return false; } });
     r.text('Clic, Enter o Espai per continuar', 640, 572, { size: 16, color: COL.dim, align: 'center' });
   }
 }

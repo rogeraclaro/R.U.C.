@@ -19,18 +19,6 @@ const LandGrantSystem = {
     const prev = state.landOrder;
     return state.turn <= 1 ? prev.slice() : prev.slice(1).concat(prev[0]);
   },
-  /** How much a colonist wants a free plot: needs first, then the profile's terrain taste, richness and adjacency. */
-  scorePlot(state, player, p) {
-    const foodCapable = state.plots.filter((q) => q.ownerId === player.id && q.terrain !== TERRAIN.MOUNTAIN).length;
-    let s = 0;
-    if (player.aiProfile === 'industrial') s += p.terrain === TERRAIN.MOUNTAIN ? 3 + p.richness * 2 : p.terrain === TERRAIN.PLAIN ? 3 : 2;
-    else if (player.aiProfile === 'conservative') s += p.terrain === TERRAIN.RIVER ? 5 : p.terrain === TERRAIN.PLAIN ? 4 : 2 + p.richness * 0.5;
-    else s += p.terrain === TERRAIN.PLAIN ? 4 : p.terrain === TERRAIN.RIVER ? 3.5 : 2.5 + p.richness * 0.8;
-    if (foodCapable < 2 && p.terrain !== TERRAIN.MOUNTAIN) s += 2;
-    s += Plot.neighbours(state.plots, p).filter((n) => n.ownerId === player.id).length * 0.8;
-    // Tournament: [Atari code] known crystite counts in the computers' plot ratings (CrystiteSystem.rating; 0 elsewhere).
-    return s + CrystiteSystem.rating(state, p);
-  }
 };
 
 /**
@@ -45,10 +33,12 @@ const LandRace = {
     const frames = levelRules(state).cursorFrames;
     const land = {
       msPerPlot: framesMs(frames), pauseMs: framesMs(frames * CONFIG.LAND.claimPauseSteps), clock: 0, acc: 0, sweep: 0, cursor: -1, dwellLeft: 0, eligible: [],
-      claimed: {}, inputs: [], ai: {}, aiIds: aiIds.slice(), tieOrder: LandGrantSystem.tieOrder(state),
+      claimed: {}, inputs: [], ai: {}, aiIds: aiIds.slice(), tieOrder: LandGrantSystem.tieOrder(state), quality: {},
       pause: 0, afterPlot: -1, done: false, hold: CONFIG.LAND.holdMs, lastClaim: null
     };
     state.landOrder = land.tieOrder.slice();
+    // [Atari code] calcPlayersPlotsQuality: each computer rates the goods once per grant (3 simulated rounds; round 1: one good at 32).
+    land.aiIds.forEach((id) => { land.quality[id] = AISystem.grantQuality(state, rng); });
     this.startSweep(state, rng, land, 1, state.players.map((p) => p.id));
     return land;
   },
@@ -72,23 +62,18 @@ const LandRace = {
     return true;
   },
   /**
-   * AI: pick a target among the free plots at or AHEAD of the public cursor (the sweep order is public), scored with the usual
-   * valuation +-error, then schedule the press so it lands around the cursor's arrival, shifted by a reaction time drawn
-   * from the seeded PRNG. It never looks at anything a human could not see.
+   * AI: [Atari code] the computer aims at the plot calcPlayerBestPlotAi picks from its own rating map (AISystem.landRating with the
+   * grant's goods qualities), scanning from the public cursor; it presses when the cursor gets there. R.U.C. keeps a seeded reaction
+   * time around the arrival (not in the original, which presses at once) so the race reads like a button press.
    */
   plan(state, rng, land, pid) {
     const d = CONFIG.AI; const player = playerById(state, pid);
     const reaction = rng.range(d.reactMin, d.reactMax);
-    let best = -1; let bestScore = -1e9; let bestRank = 0; let rank = 0;
-    for (let id = land.cursor; id < state.plots.length; id++) {
-      const p = state.plots[id]; if (!Plot.claimable(p)) continue;
-      const err = (rng.next() * 2 - 1) * d.valuationErr / 100;
-      // A small penalty per plot of waiting: the far end of the map may be gone by the time the cursor gets there.
-      const sc = LandGrantSystem.scorePlot(state, player, p) * (1 + err) - 0.04 * rank;
-      if (sc > bestScore) { bestScore = sc; best = id; bestRank = rank; }
-      rank++;
-    }
+    const quality = land.quality[pid] || AISystem.grantQuality(state, rng);
+    const ratings = state.plots.map((p) => (Plot.claimable(p) ? AISystem.landRating(state, player, p, quality) : 0));
+    const best = AISystem.bestPlot(ratings, land.cursor, (id) => Plot.claimable(state.plots[id]), rng);
     if (best < 0) { delete land.ai[pid]; return; }
+    let bestRank = 0; for (let id = land.cursor; id < best; id++) if (Plot.claimable(state.plots[id])) bestRank++;
     const arrival = bestRank === 0 ? 0 : land.dwellLeft + (bestRank - 1) * land.msPerPlot;
     // The AI anticipates the arrival by its AVERAGE reaction; its actual (random) reaction decides how early/late it lands.
     const mid = (d.reactMin + d.reactMax) / 2;

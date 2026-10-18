@@ -50,7 +50,7 @@ class GameOverScreen {
     s.players.forEach((p, k) => {
       c.strokeStyle = p.color; c.lineWidth = p.isHuman ? 4 : 2; c.setLineDash(k === 0 ? [] : k === 1 ? [10, 4] : k === 2 ? [3, 4] : [14, 4, 3, 4]); c.beginPath();
       hist.forEach((hh, i) => { if (i === 0) c.moveTo(px(i), py(hh.worth[k])); else c.lineTo(px(i), py(hh.worth[k])); }); c.stroke(); c.setLineDash([]);
-      r.text(p.name, x + 60 + k * 110, y + h - 22, { size: 16, color: p.color });
+      r.text(p.name, x + 60 + k * 110, y + h - 22, { size: 16, color: p.color, maxW: 104, fit: true });
     });
   }
 }

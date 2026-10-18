@@ -10,12 +10,10 @@
  *           the message (an R.U.C. convenience, see README).
  */
 const CrystiteSystem = {
-  /** [Atari code] crystiteFound: "NO" / "LOW" / "MEDIUM" / "HIGH" (+ " CRYSTITE FOUND IN PLOT."), faithful Catalan. */
-  LEVEL_NAMES: Object.freeze(['No', 'Poc', 'Mitjà', 'Molt']),
+  /** [Atari code] crystiteFound: "NO" / "LOW" / "MEDIUM" / "HIGH" (+ " CRYSTITE FOUND IN PLOT."), faithful Catalan ("NO" = "Gens de"). */
+  LEVEL_NAMES: Object.freeze(['Gens', 'Poc', 'Mitjà', 'Molt']),
   /** Manhattan distance between two plots. */
   dist(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); },
-  /** Plots from the town, the computers' walking cost unit ([Atari code] as for installs). */
-  townDist(p) { return Math.abs(p.x - CONFIG.RIVER_COL) + Math.abs(p.y - CONFIG.TOWN_ROW); },
   noMining(p) { return p.terrain === TERRAIN.RIVER || p.terrain === TERRAIN.TOWN; },
   /**
    * [Atari code] $4330-$4343 + expandCrystite $48C9: 3 seeds (the loop runs 3 times; [RE]/[FN] say 4, the code wins) on distinct
@@ -67,7 +65,7 @@ const CrystiteSystem = {
   /**
    * [Atari code] $3868-$38E1 computer assay (Tournament only), after its installs and before the pub: skipped once >= 3 HIGH plots
    * are known; candidates are its own plots, then free plots, never river / town / known ones, the highest deduced value first; each
-   * candidate is taken with a 1/8 chance (7/8 skipped). Each assay costs 10 + 2 x distance PTU and the computer stops when fewer than
+   * candidate is taken with a 1/8 chance (7/8 skipped). Each assay costs 10 + 4 x AISystem.storeDist PTU and the computer stops when fewer than
    * 22 are left. [PROVISIONAL]: the scan wraps around until one is taken (the code's behaviour at the end of the list is unread).
    * `clock` ({ units }) is the computer's development time. Returns the assayed plot ids.
    */
@@ -83,7 +81,7 @@ const CrystiteSystem = {
       let pick = null;
       for (let k = 0; !pick && k < cands.length * 64; k++) if (rng.int(K.aiPick) === 0) pick = cands[k % cands.length].q;
       pick = pick || cands[0].q;
-      clock.units -= K.aiUnits + K.aiDistUnits * this.townDist(pick);
+      clock.units -= K.aiUnits + K.aiDistUnits * AISystem.storeDist(pick);
       this.learn(state, pick.id, pick.hiddenDeposit); done.push(pick.id);
     }
     return done;
