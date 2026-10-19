@@ -290,7 +290,8 @@ Substitueix la secció 7 de l'especificació (ordre per torns + clic i confirmar
 
 ## Subhastes
 
-**Temps** ([C64], PAL 50,125 Hz; [codi Atari]): la barra de temps compta unitats. Declaració: **31 unitats de 7 fotogrames** (≈ 4,3 s,
+**Temps** ([C64], PAL 50,125 Hz; [codi Atari]): la barra de temps compta unitats. Declaració: **31 unitats de 13 fotogrames** (≈ 8 s; al C64 es van mesurar 7 fotogrames, ≈ 4,3 s, però aquí és més llarga a
+propòsit perquè els humans tinguin temps de declarar-se;
 «Declareu-vos compradors o venedors»; al C64 «PUSH STICK TO DECLARE AS BUYER OR SELLER»), amb «La botiga té N unitats». Negociació:
 **72 unitats** de **8 fotogrames** (≈ 11,5 s) si ningú no negocia; **60 fotogrames** per unitat mentre un comprador i un venedor es toquen
 (el temps passa més a poc a poc, mesurat al C64; el codi Atari atura el rellotge); **30 fotogrames** (l'ATU sencera del codi Atari) mentre
@@ -369,7 +370,7 @@ Només a l'Estàndard, just després de l'adjudicació ([codi Atari], [C64]):
 | Oferta i demanda: P × (0,25 + 0,75 × demanda/oferta), quocient en vuitens; smithore amb quocient entre 0,25 i 3, mínim provisional 50 i pas aleatori de 7 × binomial (−28..+28); mínims 30 / 25 / 20, sostre 250 | codi Atari | `StoreSystem.updatePrices`, `supplyDemand`, `limit` |
 | Preu del RUC: 2 × preu del smithore arrodonit avall a desenes (100 al començament) | codi Atari, C64 | `StoreSystem.rucPrice` |
 | Sense estoc a la botiga, el preu entre colons no té sostre | manual (Standard) | `AuctionEngine.playerMax` |
-| Temps de subhasta: declaració 31 × 7 fotogrames, negociació 72 × 8 (60 per unitat en contacte); Principiant ATU 50 (×5/3), el doble al torn 1 | C64, codi Atari | `CONFIG.AUCTION`, `AuctionEngine.timing` |
+| Temps de subhasta: declaració 31 × 13 fotogrames (C64: × 7, allargada a propòsit), negociació 72 × 8 (60 per unitat en contacte); Principiant ATU 50 (×5/3), el doble al torn 1 | C64, codi Atari | `CONFIG.AUCTION`, `AuctionEngine.timing` |
 | Línies 1 pas cada 8 fotogrames ($1 per pas a menjar, energia i smithore); transferència unitat a unitat cada 12, 12, 10, 8, 6, 4, 2… BTU mentre es toquen | codi Atari | `AuctionEngine.update`, `cadenceMs` |
 | Nivell crític: menjar del torn següent, energia = RUCs no energètics + 1; a l'Estàndard només s'aturen els ordinadors, al Principiant tothom | codi Atari, manual | `ConsumptionSystem.criticalLevel`, `AuctionEngine.atCritical` |
 | Subhasta de terres (Estàndard): 0–3 parcel·les de colònia, 160 cr la primera, −60 cr, sense ofertes = inicial / 2 + 52 i s'acaba el lot, 4 cr per pas, guanya la més alta (empat: menys patrimoni); primer les marcades a l'oficina | codi Atari, C64 | `LandAuction` |

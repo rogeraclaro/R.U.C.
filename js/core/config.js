@@ -42,7 +42,8 @@ const CONFIG = deepFreeze({
   STORE_PRICE: { max: 250, smithoreInterimMin: 50, smithoreStep: 7, smithoreStepMax: 4 },
   /*
    * Goods auctions. Time is counted in units of the time bar, each lasting a number of PAL frames that depends on what happens:
-   *   declareUnits x frames.declare: [C64] measured 31 units x 7 frames (~4.3 s) ([Atari code]: 30 ticks of ATU/4).
+   *   declareUnits x frames.declare: [C64] measured 31 units x 7 frames (~4.3 s) ([Atari code]: 30 ticks of ATU/4). [PROVISIONAL]
+   *     user decision 2026-10-19: deliberately longer than the C64 measurement, 31 x 13 frames (~8 s), so humans have time to declare.
    *   tradeUnits x frames.idle: [C64] measured 72-75 units x 8 frames (~11.5 s) when nobody trades ([Atari code]: 70 ticks of ATU/4,
    *     ATU = 30 frames in Standard). We take 72, the low end of the C64 measurement.
    *   frames.contact: [C64] ~60 frames per unit while a buyer and a seller touch (the [Atari code] stops the clock instead; C64 wins).
@@ -60,7 +61,7 @@ const CONFIG = deepFreeze({
    * aiHoldMs: a computer re-thinks its target at most this often (not from the original: see AISystem).
    */
   AUCTION: {
-    declareUnits: 31, tradeUnits: 72, frames: { declare: 7, idle: 8, push: 30, contact: 60 }, atuStandard: 30,
+    declareUnits: 31, tradeUnits: 72, frames: { declare: 13, idle: 8, push: 30, contact: 60 }, atuStandard: 30,
     lineFrames: 8, cadenceBtu: [12, 12, 10, 8, 6, 4, 2], btuFrames: 4,
     sellerStartSteps: 1, buyerStartSteps: 10, storeBuyCap: 255, playerPriceMax: 999,
     allOutMs: 3000, noOpMs: 5000, pushMs: 100, aiHoldMs: 1500,

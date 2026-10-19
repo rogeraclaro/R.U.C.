@@ -749,14 +749,15 @@ function runSelfTests() {
     const phases = mkGame().turns.phases.map((p) => p.id).filter((id) => id.startsWith('AUCTION_')).join();
     return eq(phases, 'AUCTION_smithore,AUCTION_food,AUCTION_energy', 'phase order');
   });
-  t('Auction timing: [C64] declare 31 units x 7 frames (~4.3 s); trading 72 units x 8 frames (~11.5 s) when idle', () => {
+  t('Auction timing: declare 31 units x 13 frames (~8 s, longer than the C64 ~4.3 s on purpose); trading 72 units x 8 frames (~11.5 s) when idle', () => {
+    if (CONFIG.AUCTION.frames.declare !== 13) return `declare frames ${CONFIG.AUCTION.frames.declare}`;
     const { state, rng } = fresh(); setInv(state, 'p1', 'food', 9);
     const e = engineFor(state, rng, 'food', ['p0', 'p1'], true, true);
     e.setRole('p0', ROLE.BUYER); e.setRole('p1', ROLE.SELLER);
-    const declare = 31 * fms(7); const trade = 72 * fms(8);
+    const declare = 31 * fms(13); const trade = 72 * fms(8);
     runEngine(e, Math.floor(declare / 10) * 10);
     if (e.stage !== 'declare') return `declaration ended early (${e.clock} ms)`;
-    runEngine(e, 20); if (e.stage !== 'trade') return 'the declaration did not end at 31 x 7 frames';
+    runEngine(e, 20); if (e.stage !== 'trade') return 'the declaration did not end at 31 x 13 frames';
     if (e.unitsTotal !== 72 || Math.abs(e.units - 72) > 0.3) return `trade units ${e.units}/${e.unitsTotal}`;
     const left = trade - (e.clock - declare);
     runEngine(e, Math.floor(left / 10) * 10 - 10); if (e.ended) return `ended early: ${e.endReason} at ${e.clock}`;
@@ -775,7 +776,7 @@ function runSelfTests() {
   t('Auction timing: [Atari code] Beginner ATU 50 instead of 30 (every tick x 5/3), doubled in round 1', () => {
     const units = (level, turn) => { const { state, rng } = fresh('bt', level); state.turn = turn; const e = engineFor(state, rng, 'food', ['p0'], false, true); runEngine(e, 1000); return 31 - e.units; };
     const std = units('standard', 1); const b2 = units('beginner', 2); const b1 = units('beginner', 1);
-    if (Math.abs(std - 1000 / fms(7)) > 0.1) return `standard ${std}`;
+    if (Math.abs(std - 1000 / fms(CONFIG.AUCTION.frames.declare)) > 0.1) return `standard ${std}`;
     if (Math.abs(b2 - std * 3 / 5) > 0.1) return `beginner round 2 ${b2}`;
     return Math.abs(b1 - std * 3 / 10) < 0.1 ? true : `beginner round 1 ${b1}`;
   });
@@ -784,8 +785,9 @@ function runSelfTests() {
     const e = engineFor(state, rng, 'food', ['p0', 'p1'], false, true);
     if (!e.setRole('p0', ROLE.SELLER) || !e.setRole('p0', ROLE.BUYER) || !e.setRole('p1', ROLE.SELLER)) return 'declaring failed';
     e.setPrice('p1', 40); e.setPrice('p0', 60);
-    runEngine(e, 4300); if (e.volume || e.stage !== 'declare') return 'traded or ended the declaration early';
-    runEngine(e, 40); if (e.stage !== 'trade') return 'the declaration did not end';
+    const declareMs = CONFIG.AUCTION.declareUnits * fms(CONFIG.AUCTION.frames.declare);
+    runEngine(e, Math.floor(declareMs / 10) * 10 - 10); if (e.volume || e.stage !== 'declare') return 'traded or ended the declaration early';
+    runEngine(e, 50); if (e.stage !== 'trade') return 'the declaration did not end';
     if (e.setRole('p0', ROLE.SELLER) || e.entry('p0').role !== ROLE.BUYER) return 'the role changed after the declaration';
     runEngine(e, 1000); return eq(e.volume, 1, 'trade after the declaration');
   });
