@@ -225,14 +225,13 @@ escala cada imatge a la mida lògica i deriva l'amplada dels fotogrames de les t
 és la riquesa en smithore), el poble i la quadrícula es dibuixen amb Canvas (`js/ui/map-art.js`) en una capa fora de pantalla que només
 es refà quan canvia el terreny (p. ex. un lliscament del terratrèmol planetari). Els detalls (còdols, mates, cràters, meandres) surten
 d'un hash de la llavor de la partida i de les coordenades de la parcel·la, **no** del generador aleatori del joc: cada partida es veu
-diferent, però sempre igual en tornar-la a carregar. `map_ground_base` es conserva a `assets/` però ja no es carrega.
+diferent, però sempre igual en tornar-la a carregar.
 
 Mides reals dels PNG actuals (l'especificació en demanava d'altres; res no depèn d'aquestes mides):
 
 | Asset | Mida actual |
 |---|---|
 | `bg_irata_sky`, `auction_hall_bg` | 1376×768 |
-| `map_ground_base` (no es carrega) | 1392×768 |
 | `colony_store`, `colony_habitat` | 1264×848 |
 | `resource_*`, `module_*`, `ruc_idle`, `ui_frame_9slice` | 1024×1024 |
 | `colonists_strip` | 2064×512 (4 × 516) |
