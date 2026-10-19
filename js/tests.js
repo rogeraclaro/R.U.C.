@@ -984,6 +984,21 @@ function runSelfTests() {
     state.turn = 3; const next = LandAuction.create(state, rng, [], { colony: 1 });
     return eq(next.lot && next.lot.start, 101, 'next round start');
   });
+  t('Land auction: a ~2.5 s "Preparats" pause before each lot (no bids, no clock, AI waits too), with a sound cue; then normal bidding', () => {
+    if (CONFIG.LAND_AUCTION.introMs !== 2500) return `introMs ${CONFIG.LAND_AUCTION.introMs}`;
+    const { state, rng } = fresh('lready'); state.turn = 2; state.players.forEach((p) => setCash(state, p.id, 2000));
+    const ids = state.players.map((p) => p.id); const la = LandAuction.create(state, rng, ids, { colony: 1 });
+    const snap = () => JSON.stringify(la.bids) + la.units;
+    const first = snap(); runLA(state, rng, la, 2400);
+    if (la.stage !== 'intro' || snap() !== first) return `moved during the pause: ${la.stage}`;
+    LandAuction.setBid(state, la, 'p0', la.lot.start + 40); if (snap() !== first) return 'a human bid during the pause';
+    runLA(state, rng, la, 3000);
+    if (la.stage !== 'bid' || snap() === first) return `no normal bidding after the pause: ${la.stage}`;
+    const g = mkGame(); const played = []; g.audio = { play(k) { played.push(k); }, music() {}, stopMusic() {}, hold() {}, soundChanged() {}, unlock() {} };
+    g.newGame({ seed: 'lready-g' }); g.state.turn = 2; g.state.phaseData = { landAuction: LandAuction.create(g.state, g.rng, ids.slice(1), { colony: 1 }) };
+    g.turns.enter(g, 'LAND_AUCTION', true);
+    return played.includes('declare') ? true : `no cue: ${played.join()}`;
+  });
   t('Land auction: highest bid at time-out wins, a tie goes to the poorer colonist, nobody bids past their cash; colony sale money goes to the store', () => {
     const { state, rng } = fresh('lat'); state.turn = 2; setCash(state, 'p0', 900); setCash(state, 'p2', 900); setCash(state, 'p3', 250);
     LandGrantSystem.assign(state, 'p2', 0);

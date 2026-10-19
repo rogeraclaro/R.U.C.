@@ -112,11 +112,13 @@ class LandAuctionScreen {
     const high = this.high(s, la);
     r.text(high ? `Oferta més alta: ${high.price} cr (${playerById(s, high.pid).name})` : 'Encara no hi ha cap oferta', X, y0 + 108, { size: 18, color: high ? COL.good : COL.dim, maxW: W });
   }
+  /** The lot's card and the "Preparats" pause before its clock starts (CONFIG.LAND_AUCTION.introMs): a short countdown. */
   drawIntro(r, la, s) {
-    r.panel(240, 250, 480, 170, {});
+    r.panel(240, 250, 480, 206, {});
     r.text('Subhasta de terres', 480, 266, { size: 28, color: COL.amber, align: 'center' });
     r.text(`Parcel·la #${la.lot.plotId + 1} · ven ${this.sellerName(s, la)}`, 480, 312, { size: 20, align: 'center', maxW: 450 });
     r.text(`Les ofertes comencen a ${la.lot.start} cr`, 480, 352, { size: 22, color: COL.good, align: 'center', maxW: 450 });
+    r.text(`Preparats… ${Math.max(1, Math.ceil(la.timer / 1000))}`, 480, 392, { size: 26, color: COL.amber, align: 'center' });
   }
   drawResult(game, r, la) {
     const res = la.result; const s = game.state;

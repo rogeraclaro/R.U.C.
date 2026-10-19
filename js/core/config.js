@@ -79,9 +79,10 @@ const CONFIG = deepFreeze({
    * previous set's average; noBid: an unsold colony plot records start / 2 + 52 and ends the colony set; step: $4 per marker step.
    * maxLots: [Atari code] 1 + variation (0..3 in Standard). Timing: the same time units as the goods trade stage (tradeUnits, idle /
    * push ticks; [Atari code] 70 ATU per auction). minStart, bottomSteps, introMs, resultMs: [PROVISIONAL] R.U.C. values (the start
-   * never drops below $4; bidders' markers start 10 steps below the start line; intro and result cards are shown 2 s and 2.5 s).
+   * never drops below $4; bidders' markers start 10 steps below the start line; intro and result cards are shown 2.5 s each). introMs is also the "Preparats" pause before every lot's clock: no bids, no
+   * clock, the computers wait too, and a cue sounds at its start ([PROVISIONAL] user decision 2026-10-19: 2 s -> 2.5 s).
    */
-  LAND_AUCTION: { firstStart: 160, drop: 60, noBidHalf: 52, step: 4, maxLots: 3, minStart: 4, bottomSteps: 10, introMs: 2000, resultMs: 2500 },
+  LAND_AUCTION: { firstStart: 160, drop: 60, noBidHalf: 52, step: 4, maxLots: 3, minStart: 4, bottomSteps: 10, introMs: 2500, resultMs: 2500 },
   // Land race: the game clock advances in fixed steps so the outcome never depends on the frame rate. The cursor speed and the
   // claim pause depend on the level (CONFIG.LEVELS cursorFrames; [Atari code] the pause is 4 cursor steps).
   LAND: { stepMs: 10, holdMs: 900, claimPauseSteps: 4 },

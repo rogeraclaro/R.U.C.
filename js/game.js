@@ -348,7 +348,7 @@ class Game {
   }
   /** Sounds and screen-reader text when a land-auction lot changes stage. */
   landAuctionFeedback(la) {
-    if (la.stage === 'intro' && la.lot) { this.rt.landView = { hi: 0 }; this.announce(`Parcel·la #${la.lot.plotId + 1}: les ofertes comencen a ${la.lot.start} cr`); }
+    if (la.stage === 'intro' && la.lot) { this.rt.landView = { hi: 0 }; this.audio.play('declare'); this.announce(`Parcel·la #${la.lot.plotId + 1}: les ofertes comencen a ${la.lot.start} cr`); }
     if (la.stage === 'result') {
       const r = la.result;
       this.audio.play(r.sold ? 'auction_over' : 'phase');
@@ -587,6 +587,7 @@ class Game {
           const la = ts.phaseData.landAuction;
           if (la.done) { ts.canAdvance = true; return; }
           g.setScreen('landAuction'); g.rt.landView = { hi: 0 };
+          if (la.stage === 'intro') g.audio.play('declare'); // the "Preparats" cue of the first lot (the next ones: landAuctionFeedback)
           g.announce(`Subhasta de terres: les ofertes comencen a ${la.lot.start} cr`);
         },
         update: (g, dt, ts) => {
