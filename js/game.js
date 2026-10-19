@@ -366,6 +366,7 @@ class Game {
   skipPhase(pid = null) {
     const pd = this.turns.phaseData; if (!pd || !pd.skippable) return;
     if (pd.wait) { this.handOverPress(pid || this.pidOfSeat(0)); return; }
+    if (this.turns.phase === 'LAND_AUCTION') { this.landNext(); return; } // closes a lot's result card, not the whole land auction
     this.turns.canAdvance = true;
   }
 
@@ -424,9 +425,10 @@ class Game {
   }
   /**
    * [Atari code] waitPlayersButtons: with two or more humans, the status and summary screens wait for every human's button (each one
-   * recorded as he presses), or CONFIG.HANDOVER.timeoutMs. One human keeps the classic wait (a press / click); the demo uses a timer.
+   * recorded as he presses). One human keeps the classic wait (a press / click); the demo uses a timer.
+   * [PROVISIONAL] user decision: no ~17 s timeout as the original - a game with a human never advances on its own (waitsForHuman).
    */
-  handOver(ts) { if (!this.autopilot && this.humanIds().length >= 2) ts.phaseData.wait = { pressed: [], ms: 0 }; }
+  handOver(ts) { if (!this.autopilot && this.humanIds().length >= 2) ts.phaseData.wait = { pressed: [] }; }
   handOverPress(pid) {
     const w = this.turns.phaseData && this.turns.phaseData.wait; if (!w || !pid) return;
     if (!w.pressed.includes(pid)) { w.pressed.push(pid); this.audio.play('click'); }
@@ -434,10 +436,11 @@ class Game {
   }
   /** The timer of a status / summary screen: the autopilot's short one, or [Atari code] the demo's ~8.5 s. */
   handOverMs() { return this.isDemo() ? CONFIG.HANDOVER.demoMs : this.fast(400); }
-  updateHandOver(dt, ts) {
-    const w = ts.phaseData.wait; if (!w) return;
-    w.ms += dt; if (w.ms >= CONFIG.HANDOVER.timeoutMs) ts.canAdvance = true;
-  }
+  /**
+   * True while a human plays (not the demo, not the autopilot): continue prompts (event cards, production, status, summary, auction
+   * results) then wait for Continuar and never time out. The demo and the autopilot keep their timers.
+   */
+  waitsForHuman() { return !this.autopilot && this.humanIds().length > 0; }
 
   /* ---- auction input ---- */
   /** Roles can only be chosen during the declaration ([manual]); afterwards they are fixed. */
@@ -488,7 +491,7 @@ class Game {
   }
   /** A sparse clock tick while an auction's time units run down: one every 10 units. */
   auctionTick(before, after) { if (Math.floor(before / 10) !== Math.floor(after / 10)) this.audio.play('auction_tick'); }
-  /** Shortens the result card of the current lot (button / Enter). */
+  /** Closes the result card of the current lot (button / Enter); with a human it waits for this. */
   landNext() { const la = this.landAuction(); if (la && la.stage === 'result') la.timer = 0; }
   /** Visible price window: from the store minimum up to a top that only grows during the auction (never past the colonist limit). */
   auctionView() {
@@ -539,6 +542,8 @@ class Game {
   /** The phase list of a game: the goods auctions follow the level's resources (Tournament adds crystite after smithore). */
   defineTurnPhases(state = null) {
     const timed = (g, dt, ts) => { ts.phaseData.timer -= dt; if (ts.phaseData.timer <= 0) ts.canAdvance = true; };
+    // A continue prompt: timed for the demo / autopilot; with a human it waits for Continuar (a zero timer = nothing shown, goes on).
+    const prompt = (g, dt, ts) => { if (!(g.waitsForHuman() && ts.phaseData.timer > 0)) timed(g, dt, ts); };
     const defs = [
       {
         // [C64] round 1 opens with the landing: "Aterreu al planeta Irata." / "La nau tornarà d'aquí a N mesos." (a skippable card).
@@ -547,7 +552,7 @@ class Game {
           const s = g.state; s.turn += 1; s.modifiers = GameState.freshModifiers(); s.event = { items: [] }; EventSystem.rankPlayers(s, g.rng); g.rt = {};
           if (s.turn === 1) g.showPlanetCard(ts, EventSystem.landing(s)); else { g.setScreen('map'); ts.canAdvance = true; }
         },
-        update: timed
+        update: prompt
       },
       {
         id: 'LAND_GRANT', label: 'Adjudicació de terra', save: true, resumable: true,
@@ -589,9 +594,10 @@ class Game {
           if (!g.autopilot) g.updateLandInput(dt);
           const before = `${la.stage}|${la.lot && la.lot.plotId}`;
           const unitsBefore = la.units;
-          LandAuction.update(g.state, g.rng, la, dt);
+          LandAuction.update(g.state, g.rng, la, dt, g.waitsForHuman());
           if (`${la.stage}|${la.lot && la.lot.plotId}` !== before) g.landAuctionFeedback(la);
           else if (la.stage === 'bid') g.auctionTick(unitsBefore, la.units);
+          ts.phaseData.skippable = la.stage === 'result';
           if (la.done) ts.canAdvance = true;
         }
       },
@@ -620,7 +626,7 @@ class Game {
           }
           g.showPlanetCard(ts, rec);
         },
-        update: timed
+        update: prompt
       },
       {
         id: 'PRODUCTION', label: 'Producció', save: true,
@@ -630,7 +636,7 @@ class Game {
           g.rt.prod = { reports: st.rows, order, t: 0, duration: g.fast(g.settings.reduceMotion ? 1800 : 5000) }; ts.phaseData.skippable = true; g.setScreen('production');
           g.announce('Producció completada');
         },
-        update: (g, dt, ts) => { const p = g.rt.prod; p.t += dt; if (p.t >= p.duration + g.fast(2500)) ts.canAdvance = true; }
+        update: (g, dt, ts) => { const p = g.rt.prod; p.t += dt; if (p.t >= p.duration + g.fast(2500) && !g.waitsForHuman()) ts.canAdvance = true; }
       },
       {
         // [Atari code] pest, pirates and fire strike after the production has been shown.
@@ -641,12 +647,12 @@ class Game {
           if (rec) s.event.items.push(rec);
           g.showPlanetCard(ts, rec);
         },
-        update: timed
+        update: prompt
       },
       {
         id: 'STATUS', label: 'Estat: consum i malbaratament', save: true,
         enter: (g, ts) => { g.rt.reportMode = 'status'; ts.phaseData.timer = g.handOverMs(); ts.phaseData.skippable = true; g.handOver(ts); g.setScreen('report'); g.announce('Estat del torn: consum, malbaratament i collita'); },
-        update: (g, dt, ts) => { if (g.autopilot || g.isDemo()) timed(g, dt, ts); else g.updateHandOver(dt, ts); }
+        update: prompt
       }
     ];
     auctionResources(state).forEach((d) => defs.push(this.auctionPhase(d)));
@@ -661,7 +667,7 @@ class Game {
           g.rt.reportMode = 'turn'; ts.phaseData.skippable = true; ts.phaseData.timer = g.handOverMs(); g.handOver(ts); g.setScreen('report');
           g.announce(`Informe del torn ${s.turn}`);
         },
-        update: (g, dt, ts) => { if (g.autopilot || g.isDemo()) timed(g, dt, ts); else g.updateHandOver(dt, ts); }
+        update: prompt
       },
       { id: 'AUTOSAVE', label: 'Desat', enter: (g, ts) => { g.save(); ts.canAdvance = true; } },
       {
@@ -712,7 +718,7 @@ class Game {
           if (e.ended) g.audio.play('auction_over');
         } else {
           a.endHold += dt; ts.phaseData.skippable = true;
-          if (a.endHold >= (g.autopilot ? 200 : 4000)) ts.canAdvance = true;
+          if (!g.waitsForHuman() && a.endHold >= (g.autopilot ? 200 : 4000)) ts.canAdvance = true;
         }
       },
       exit: (g) => {

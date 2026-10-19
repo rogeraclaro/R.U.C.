@@ -95,11 +95,12 @@ const LandAuction = {
       .sort((a, b) => (la.bids[b].price - la.bids[a].price) || (worth(a) - worth(b)) || (order.indexOf(a) - order.indexOf(b)));
   },
   highBid(state, la) { const r = this.ranking(state, la); return r.length ? { pid: r[0], price: la.bids[r[0]].price } : null; },
-  update(state, rng, la, dt) {
+  /** `hold`: a human plays, so the result card stays until Continuar (Game.landNext zeroes the timer). */
+  update(state, rng, la, dt, hold = false) {
     if (la.done) return;
     la.clock += dt;
     if (la.stage === 'intro') { la.timer -= dt; if (la.timer <= 0) { la.stage = 'bid'; la.timer = 0; } return; }
-    if (la.stage === 'result') { la.timer -= dt; if (la.timer <= 0) this.nextLot(state, rng, la); return; }
+    if (la.stage === 'result') { if (!hold) la.timer -= dt; if (la.timer <= 0) this.nextLot(state, rng, la); return; }
     this.aiStep(state, la, dt);
     const tick = la.pushMs > 0 ? la.timing.push : la.timing.idle;
     la.units = Math.max(0, la.units - dt / tick);

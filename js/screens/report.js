@@ -77,19 +77,18 @@ class ReportScreen {
     return Array.from({ length: n }, (_, i) => ({ x: 70 + Math.floor(i / rows) * 580, y: 566 + (i % rows) * rowH, w, size }));
   }
   /**
-   * [Atari code] "PRESS ALL PLAYER BUTTONS TO GO ON." with two or more humans: who has pressed, and the time left (Game.handOver).
+   * [Atari code] "PRESS ALL PLAYER BUTTONS TO GO ON." with two or more humans: who has pressed (Game.handOver; no timeout).
    * The button is P1's press (mouse / touch). Returns false when there is no such wait (one human: the classic button).
    */
   static drawWait(game, r) {
     const w = game.turns.phaseData && game.turns.phaseData.wait; if (!w) return false;
-    const s = game.state; const left = Math.max(0, Math.ceil((CONFIG.HANDOVER.timeoutMs - w.ms) / 1000));
+    const s = game.state;
     r.button('rep-next', 'Prem tots els botons dels jugadors per continuar', 70, 646, 560, 52, { primary: true, size: 18, onClick: () => game.skipPhase() });
     game.humanIds().forEach((id, i) => {
       const p = playerById(s, id); const ok = w.pressed.includes(id); const x = 650 + i * 140;
       r.glyph(p.shape, x + 10, 672, 8, p.color, '#05070d');
       r.text(`${ok ? '✔' : '…'} ${PlayerControls.button(p.keys)}`, x + 24, 662, { size: 16, color: ok ? COL.good : COL.dim, maxW: 112 });
     });
-    r.text(`${left} s`, 1210, 662, { size: 16, color: COL.dim, align: 'right' });
     return true;
   }
 }

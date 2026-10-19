@@ -145,8 +145,11 @@ res més); després funciona a més de les tecles d'aquell jugador.
 - **Desenvolupament**: un per un, en l'ordre de patrimoni; cada humà comença («Prem el botó per començar») i camina amb els seus
   controls. El ratolí, el tacte i els botons de pantalla funcionen per a qui té el torn; les tecles de J1 només en el torn de J1.
 - **Estat i informe del torn**: «Prem tots els botons dels jugadors per continuar» ([codi Atari] `waitPlayersButtons`): espera el botó
-  de cada humà (es marca qui ja ha premut; el botó de pantalla és el de J1) o un temps límit de **17 s** (1020 jiffies). Amb un sol humà,
-  com sempre: un clic o una tecla.
+  de cada humà (es marca qui ja ha premut; el botó de pantalla és el de J1), **sense temps límit** (l'original avançava sol al cap de
+  ~17 s; decisió de disseny). Amb un sol humà, com sempre: un clic o una tecla.
+- **Sense avanç automàtic**: mentre juga algun humà, cap pantalla d'espera avança sola: targetes d'esdeveniment, producció, estat,
+  informe del torn i resultats de les subhastes (de béns i de terres) esperen «Continuar» (botó, clic, `Enter`/`Espai` o el botó de
+  cada jugador). Els temps de joc (torn de desenvolupament, rellotge de subhasta, cursor de terres) no canvien.
 - **Demostració** ([C64] COMPUTER DEMO): quatre ordinadors; les pantalles d'espera avancen soles al cap de **~8,5 s**; al final comença
   una partida nova amb una llavor nova, indefinidament. Qualsevol tecla, clic o botó de comandament torna al títol. La demo no desa mai.
 

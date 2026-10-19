@@ -190,8 +190,9 @@ const CONFIG = deepFreeze({
     { name: 'Nox', profile: 'opportunist' }, { name: 'Iris', profile: 'industrial' }
   ],
   // [Atari code] waitPlayersButtons ($308A): "PRESS ALL PLAYER BUTTONS TO GO ON" waits for every human, or 255 x 4 = 1020 jiffies
-  // (~17 s); the computer demo (no humans) auto-advances after 2 x 255 jiffies (~8.5 s) and loops forever.
-  HANDOVER: { timeoutMs: 17000, demoMs: 8500 },
+  // (~17 s) - [PROVISIONAL] user decision: no timeout while a human plays (Game.waitsForHuman). The computer demo (no humans)
+  // auto-advances after 2 x 255 jiffies (~8.5 s) and loops forever.
+  HANDOVER: { demoMs: 8500 },
   // The key stays the same so an old (schema 1-2) save is detected and refused with an explicit message.
   // Schema 3: original start stocks, store price P in the state, new food/time/score rules.
   // Schema 4: the 22 original personal events (used flags) and the planetary event bag (state.events).

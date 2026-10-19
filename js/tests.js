@@ -2104,7 +2104,8 @@ function runSelfTests() {
     for (let i = 0; i < max && !pred(); i++) {
       const pd = G.turns.phaseData; const ph = G.turns.phase;
       if (pd && pd.wait) G.humanIds().forEach((id) => G.playerButton(id));
-      else if (pd && pd.skippable && ph && !ph.startsWith('AUCTION_')) G.skipPhase();
+      else if (pd && pd.skippable && ph && (!ph.startsWith('AUCTION_') || (G.rt.auction && G.rt.auction.engine.ended))) G.skipPhase();
+      else if (ph === 'LAND_AUCTION') G.landNext();
       const sl = G.devSlot(); if (sl && sl.stage === 'ready') G.devStart(); else if (G.humanWalk()) G.devFinish();
       G.tick(50);
     }
@@ -2214,7 +2215,7 @@ function runSelfTests() {
     const x2 = w.x; g.input.keys.add('ArrowLeft'); g.fastForward(500); g.input.keys.delete('ArrowLeft');
     return w.x === x2 ? true : 'P1 arrows moved P2\'s colonist';
   });
-  t('Hand-over (2 humans): "Prem tots els botons" waits for every human, or [Atari code] ~17 s; one human keeps the old wait', () => {
+  t('Hand-over (2 humans): "Prem tots els botons" waits for every human with no timeout; one human keeps the old wait', () => {
     const g = mpGame('mp-hand');
     if (!drive(g, () => g.turns.phase === 'STATUS')) return `stuck in ${g.turns.phase}`;
     if (!g.turns.phaseData.wait) return 'no button wait';
@@ -2223,12 +2224,35 @@ function runSelfTests() {
     g.onPlayerKey(key('KeyQ', 'q')); g.tick(50);
     if (g.turns.phase === 'STATUS') return 'did not advance with every button';
     if (!drive(g, () => g.turns.phase === 'TURN_REPORT', 100000)) return 'no turn report';
-    g.fastForward(CONFIG.HANDOVER.timeoutMs - 200); if (g.turns.phase !== 'TURN_REPORT') return 'timed out too early';
-    g.fastForward(400); if (g.turns.phase === 'TURN_REPORT') return 'no timeout';
+    g.fastForward(120000); if (g.turns.phase !== 'TURN_REPORT') return 'the summary advanced on its own';
+    g.humanIds().forEach((id) => g.playerButton(id)); g.tick(50); if (g.turns.phase === 'TURN_REPORT') return 'did not advance after every button';
     const one = mkGame(); one.newGame({ seed: 'mp-hand' });
     if (!drive(one, () => one.turns.phase === 'STATUS')) return 'single: no status';
     if (one.turns.phaseData.wait) return 'single human got the multi wait';
     one.fastForward(30000); return one.turns.phase === 'STATUS' ? true : 'single human status timed out';
+  });
+  t('No auto-advance with a human seat: event card, production, status, land- and goods-auction results wait for Continuar (120 s)', () => {
+    const g = mpGame('stay-1', [two[0]]); const long = 120000;
+    const stays = (label, at, press) => {
+      if (!drive(g, at)) return `${label}: never reached (${g.turns.phase})`;
+      const ph = g.turns.phase; g.fastForward(long);
+      if (g.turns.phase !== ph || !at()) return `${label}: advanced on its own to ${g.turns.phase}`;
+      press(); g.tick(50); return at() ? `${label}: Continuar did not advance` : null;
+    };
+    const steps = [
+      ['landing card', () => g.turns.phase === 'TURN_START', () => g.skipPhase()],
+      ['land-auction result', () => !!g.landAuction() && g.landAuction().stage === 'result', () => g.landNext()],
+      ['production', () => g.turns.phase === 'PRODUCTION', () => g.skipPhase()],
+      ['status', () => g.turns.phase === 'STATUS', () => g.skipPhase()],
+      ['goods-auction end', () => !!(g.turns.phase || '').startsWith('AUCTION_') && !!g.rt.auction && g.rt.auction.engine.ended, () => g.skipPhase()],
+      ['turn report', () => g.turns.phase === 'TURN_REPORT', () => g.skipPhase()]
+    ];
+    for (const [label, at, press] of steps) {
+      // A goods auction is only reached by playing it out: the drive loop never ends it, so run the clock first.
+      if (label === 'goods-auction end') { drive(g, () => (g.turns.phase || '').startsWith('AUCTION_')); g.fastForward(long, 50, at); }
+      const err = stays(label, at, press); if (err) return err;
+    }
+    return true;
   });
   t('Save: schema 9 keeps the seats (humans, names, colours, species, keys) of a 2-human game; schema 8 is refused', () => {
     if (CONFIG.SCHEMA_VERSION !== 9) return `schema ${CONFIG.SCHEMA_VERSION}`;
