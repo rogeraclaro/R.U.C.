@@ -44,6 +44,11 @@ jobs:
           mkdir -p public
           cp index.html public/
           cp -r assets css js public/
+          # Cache busting: every deploy gets new script/stylesheet URLs, and the asset loader reads the version for images.
+          v="${GITHUB_SHA::8}"
+          sed -i -E "s#(src=\"js/[^\"]+\.js)\"#\1?v=$v\"#; s#(href=\"css/[^\"]+\.css)\"#\1?v=$v\"#" public/index.html
+          sed -i "s#<meta charset=\"utf-8\">#<meta charset=\"utf-8\">\n<meta name=\"ruc-version\" content=\"$v\">#" public/index.html
+          grep -c "?v=$v" public/index.html
 
       - name: Configure SSH
         env:

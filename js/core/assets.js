@@ -25,6 +25,11 @@ const PROCEDURAL_ART = {
     PROCEDURAL_ART.resource_crystite(ctx, x + w * 0.12, y + h * 0.12, w * 0.76, h * 0.76);
   }
 };
+/** Cache-busting query for images: the deploy writes the commit into <meta name="ruc-version"> (none when run locally). */
+function assetVersionQuery() {
+  const meta = typeof document !== 'undefined' && document.querySelector('meta[name="ruc-version"]');
+  return meta && meta.content ? `?v=${encodeURIComponent(meta.content)}` : '';
+}
 class AssetLoader {
   constructor(list = ASSET_LIST) {
     this.list = list;
@@ -43,7 +48,7 @@ class AssetLoader {
       const img = new Image();
       img.onload = () => { this.images.set(a.name, img); finish(); };
       img.onerror = () => { this.failed.add(a.name); finish(); };
-      img.src = `${base}${a.name}.png`;
+      img.src = `${base}${a.name}.png${assetVersionQuery()}`;
     }))).then(() => { this.done = true; });
   }
   def(name) { return this.list.find((a) => a.name === name); }
