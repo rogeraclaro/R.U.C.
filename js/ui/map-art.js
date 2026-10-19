@@ -72,7 +72,7 @@ const MapArt = {
 
   /* ---- painting (needs a canvas) ---- */
   PAL: {
-    ground: [229, 210, 168], groundLo: [214, 186, 146], grid: 'rgba(110,78,44,0.16)',
+    ground: [229, 210, 168], groundLo: [214, 186, 146], grid: 'rgba(120,88,52,0.07)',
     rockLit: '#c49a8a', rockShade: '#86605f', rockEdge: 'rgba(72,44,40,0.75)', rockCap: '#f2e2d4',
     shadow: 'rgba(110,70,35,0.26)', waterDeep: '#3f88b0', water: '#5ea9cc', waterHi: 'rgba(235,250,255,0.75)',
     bank: 'rgba(122,92,52,0.45)', reed: '#7d9a4c', pebble: '#a88e6e', pebbleHi: '#f3e8d2', tuft: '#8aa152', crater: 'rgba(130,98,62,0.35)'
@@ -190,6 +190,7 @@ const MapArt = {
     ctx.fillRect(bx + 5, by + 21, 8, 15); ctx.fillRect(bx + bw - 13, by + 21, 8, 15); // pillars
     ctx.fillStyle = COL.amber; ctx.fillRect(bx + bw / 2 - 8, by + 21, 16, 19); // door
   },
+  /** [C64] the plot grid is barely implied: a hairline a few levels darker than the ground (owned plots get their colour on top). */
   paintGrid(ctx, T, W, H) {
     ctx.strokeStyle = this.PAL.grid; ctx.lineWidth = 1; ctx.beginPath();
     for (let x = T; x < W; x += T) { ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, H); }

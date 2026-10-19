@@ -114,6 +114,14 @@ function runSelfTests() {
     }
     return true;
   });
+  t('Map art: the unowned plot grid is only implied (a 1 px line a few levels off the ground, still visible)', () => {
+    const T = 8; const c = document.createElement('canvas'); c.width = 2 * T; c.height = 2 * T; const ctx = c.getContext('2d');
+    const [r, g, b] = MapArt.PAL.ground; ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.fillRect(0, 0, 2 * T, 2 * T);
+    MapArt.paintGrid(ctx, T, 2 * T, 2 * T);
+    const lum = (x, y) => { const d = ctx.getImageData(x, y, 1, 1).data; return 0.299 * d[0] + 0.587 * d[1] + 0.114 * d[2]; };
+    const diff = Math.abs(lum(T, 3) - lum(T - 3, 3)); const width = [T - 1, T + 1].filter((x) => Math.abs(lum(x, 3) - lum(T - 3, 3)) > 1).length;
+    return diff >= 3 && diff <= 10 && width === 0 ? true : `contrast ${diff.toFixed(1)}, extra width ${width}`;
+  });
   t('Map art: the cached layer key follows the terrain (a planetquake slide changes it; owners and RUCs do not)', () => {
     const { state: s } = fresh('slide'); const k0 = MapArt.cacheKey(s);
     LandGrantSystem.assign(s, 'p0', s.plots.find((p) => p.terrain === TERRAIN.PLAIN).id);
